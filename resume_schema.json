@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Resume",
+  "description": "Schema for a job resume",
+  "type": "object",
+  "properties": {
+    "personal_info": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "linkedin": { "type": "string", "format": "uri" },
+        "github": { "type": "string", "format": "uri" },
+        "portfolio": { "type": "string", "format": "uri" }
+      },
+      "required": ["name", "email"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "experience": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "company": { "type": "string" },
+          "location": { "type": "string" },
+          "start_date": { "type": "string", "format": "date" },
+          "end_date": { "type": "string", "format": "date" },
+          "description": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["title", "company", "start_date"]
+      }
+    },
+    "education": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "degree": { "type": "string" },
+          "institution": { "type": "string" },
+          "location": { "type": "string" },
+          "graduation_date": { "type": "string", "format": "date" },
+          "gpa": { "type": "string" }
+        },
+        "required": ["degree", "institution", "graduation_date"]
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "link": { "type": "string", "format": "uri" }
+        },
+        "required": ["name", "description"]
+      }
+    }
+  },
+  "required": ["personal_info", "experience", "education", "skills"]
+}
