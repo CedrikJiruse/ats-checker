@@ -4,3 +4,6 @@ jsonschema
 pytesseract
 Pillow
 PyPDF2
+requests
+beautifulsoup4
+lxml
