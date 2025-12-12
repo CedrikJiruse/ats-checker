@@ -10,9 +10,29 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from job_scraper_base import BaseJobScraper, JobPosting, SavedSearch, SearchFilters
-from job_scrapers import IndeedScraper, JobsIEScraper, LinkedInScraper
 
 logger = logging.getLogger(__name__)
+
+# Try to import improved scrapers first (JobSpy-based)
+try:
+    from job_scrapers_improved import (
+        GlassdoorJobSpyScraper,
+        GoogleJobSpyScraper,
+        IndeedJobSpyScraper,
+        LinkedInJobSpyScraper,
+        ZipRecruiterJobSpyScraper,
+    )
+
+    USE_IMPROVED_SCRAPERS = True
+    logger.info("Using improved JobSpy-based scrapers")
+except ImportError:
+    # Fallback to basic scrapers
+    from job_scrapers import IndeedScraper, JobsIEScraper, LinkedInScraper
+
+    USE_IMPROVED_SCRAPERS = False
+    logger.warning(
+        "Using basic scrapers. Install python-jobspy for better results: pip install python-jobspy"
+    )
 
 
 class SavedSearchManager:
@@ -159,14 +179,25 @@ class JobScraperManager:
         os.makedirs(results_folder, exist_ok=True)
 
         # Initialize all available scrapers
-        self.scrapers: Dict[str, BaseJobScraper] = {
-            "LinkedIn": LinkedInScraper(),
-            "Indeed": IndeedScraper(),
-            "Jobs.ie": JobsIEScraper(),
-        }
+        if USE_IMPROVED_SCRAPERS:
+            self.scrapers: Dict[str, BaseJobScraper] = {
+                "LinkedIn": LinkedInJobSpyScraper(),
+                "Indeed": IndeedJobSpyScraper(),
+                "Glassdoor": GlassdoorJobSpyScraper(),
+                "Google": GoogleJobSpyScraper(),
+                "ZipRecruiter": ZipRecruiterJobSpyScraper(),
+            }
+        else:
+            self.scrapers: Dict[str, BaseJobScraper] = {
+                "LinkedIn": LinkedInScraper(),
+                "Indeed": IndeedScraper(),
+                "Jobs.ie": JobsIEScraper(),
+            }
 
         self.saved_search_manager = SavedSearchManager()
         logger.info(f"JobScraperManager initialized with {len(self.scrapers)} scrapers")
+        if USE_IMPROVED_SCRAPERS:
+            logger.info("Using JobSpy library for reliable scraping")
 
     def get_available_sources(self) -> List[str]:
         """Get list of available job sources."""
