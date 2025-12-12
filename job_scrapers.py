@@ -8,12 +8,21 @@ import time
 from typing import List, Optional
 from urllib.parse import quote_plus, urlencode
 
-import requests
-from bs4 import BeautifulSoup
-
 from job_scraper_base import BaseJobScraper, JobPosting, SearchFilters
 
 logger = logging.getLogger(__name__)
+
+# Optional dependencies for web scraping
+try:
+    import requests
+    from bs4 import BeautifulSoup
+
+    SCRAPING_AVAILABLE = True
+except ImportError:
+    SCRAPING_AVAILABLE = False
+    logger.warning(
+        "Web scraping dependencies not available. Install requests and beautifulsoup4 to enable job scraping."
+    )
 
 
 class LinkedInScraper(BaseJobScraper):
@@ -32,6 +41,12 @@ class LinkedInScraper(BaseJobScraper):
         self, filters: SearchFilters, max_results: int = 50
     ) -> List[JobPosting]:
         """Search for jobs on LinkedIn."""
+        if not SCRAPING_AVAILABLE:
+            self.logger.error(
+                "Web scraping dependencies not available. Please install: pip install requests beautifulsoup4"
+            )
+            return []
+
         if not self.validate_filters(filters):
             return []
 
@@ -203,6 +218,12 @@ class IndeedScraper(BaseJobScraper):
         self, filters: SearchFilters, max_results: int = 50
     ) -> List[JobPosting]:
         """Search for jobs on Indeed."""
+        if not SCRAPING_AVAILABLE:
+            self.logger.error(
+                "Web scraping dependencies not available. Please install: pip install requests beautifulsoup4"
+            )
+            return []
+
         if not self.validate_filters(filters):
             return []
 
@@ -361,6 +382,12 @@ class JobsIEScraper(BaseJobScraper):
         self, filters: SearchFilters, max_results: int = 50
     ) -> List[JobPosting]:
         """Search for jobs on Jobs.ie."""
+        if not SCRAPING_AVAILABLE:
+            self.logger.error(
+                "Web scraping dependencies not available. Please install: pip install requests beautifulsoup4"
+            )
+            return []
+
         if not self.validate_filters(filters):
             return []
 
