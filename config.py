@@ -16,6 +16,8 @@ class Config:
         input_resumes_folder="input_resumes",
         job_descriptions_folder="job_descriptions",
         tesseract_cmd=None,
+        job_search_results_folder="job_search_results",
+        max_job_results_per_search=50,
     ):
         # Normalize folder paths to handle both relative and absolute paths
         self.output_folder = os.path.abspath(output_folder)
@@ -28,6 +30,8 @@ class Config:
         self.input_resumes_folder = os.path.abspath(input_resumes_folder)
         self.job_descriptions_folder = os.path.abspath(job_descriptions_folder)
         self.tesseract_cmd = tesseract_cmd
+        self.job_search_results_folder = os.path.abspath(job_search_results_folder)
+        self.max_job_results_per_search = max_job_results_per_search
 
     def to_dict(self):
         return {
@@ -56,6 +60,8 @@ def load_config(config_file_path="config.json", cli_args=None):
         "input_resumes_folder": "input_resumes",
         "job_descriptions_folder": "job_descriptions",
         "tesseract_cmd": None,
+        "job_search_results_folder": "job_search_results",
+        "max_job_results_per_search": 50,
     }
 
     # Load configuration from file if it exists
@@ -82,6 +88,10 @@ def load_config(config_file_path="config.json", cli_args=None):
         input_resumes_folder=os.path.abspath(config_data["input_resumes_folder"]),
         job_descriptions_folder=os.path.abspath(config_data["job_descriptions_folder"]),
         tesseract_cmd=config_data.get("tesseract_cmd"),
+        job_search_results_folder=os.path.abspath(
+            config_data.get("job_search_results_folder", "job_search_results")
+        ),
+        max_job_results_per_search=config_data.get("max_job_results_per_search", 50),
     )
 
 
