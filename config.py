@@ -41,10 +41,10 @@ except Exception as e:  # pragma: no cover
 
 DEFAULTS: Dict[str, Any] = {
     "paths": {
-        "output_folder": "output",
-        "input_resumes_folder": "input_resumes",
-        "job_descriptions_folder": "job_descriptions",
-        "job_search_results_folder": "job_search_results",
+        "output_folder": "workspace/output",
+        "input_resumes_folder": "workspace/input_resumes",
+        "job_descriptions_folder": "workspace/job_descriptions",
+        "job_search_results_folder": "workspace/job_search_results",
         # State and saved searches are not part of the main config today,
         # but putting them here makes the system easier to relocate.
         "state_file": "data/processed_resumes_state.toml",
@@ -103,8 +103,28 @@ DEFAULTS: Dict[str, Any] = {
         "max_iterations": 3,
         # A safety guard: require at least this improvement to continue iterating.
         "min_score_delta": 0.1,
+        # Iteration strategy (advanced)
+        # - "best_of": keep best candidate seen so far; stop on target/no_progress/max_iterations
+        # - "first_hit": stop immediately once target_score is reached
+        # - "patience": stop if no improvement is seen for N iterations (more stable)
+        "iteration_strategy": "patience",
+        "iteration_patience": 2,
+        "stop_on_regression": True,
+        "max_regressions": 2,
         # Structured output format for enhanced resume data: "json" | "toml" | "both"
         "structured_output_format": "toml",
+        # Schema validation (best-effort; if enabled, the app should validate AI output
+        # against a schema and retry once or fail fast depending on config).
+        "schema_validation_enabled": False,
+        "resume_schema_path": "",
+        "schema_validation_max_retries": 1,
+        # Recommendations: allow generating actionable suggestions based on score breakdown.
+        "recommendations_enabled": False,
+        "recommendations_max_items": 5,
+        # Output layout: controls how files are organized under the output folder.
+        # Example pattern: "{resume_name}/{job_title}/{timestamp}"
+        "output_subdir_pattern": "{resume_name}/{job_title}/{timestamp}",
+        "write_score_summary_file": True,
     },
     "job_search": {
         "max_job_results_per_search": 50,
@@ -144,7 +164,26 @@ class Config:
     target_score: float
     max_iterations: int
     min_score_delta: float
+
+    # Iteration strategy (advanced)
+    iteration_strategy: str
+    iteration_patience: int
+    stop_on_regression: bool
+    max_regressions: int
+
+    # Output formats/layout
     structured_output_format: str
+    output_subdir_pattern: str
+    write_score_summary_file: bool
+
+    # Schema validation
+    schema_validation_enabled: bool
+    resume_schema_path: str
+    schema_validation_max_retries: int
+
+    # Recommendations
+    recommendations_enabled: bool
+    recommendations_max_items: int
 
     # Job search
     max_job_results_per_search: int
@@ -177,7 +216,18 @@ class Config:
                 "target_score": self.target_score,
                 "max_iterations": self.max_iterations,
                 "min_score_delta": self.min_score_delta,
+                "iteration_strategy": self.iteration_strategy,
+                "iteration_patience": self.iteration_patience,
+                "stop_on_regression": self.stop_on_regression,
+                "max_regressions": self.max_regressions,
                 "structured_output_format": self.structured_output_format,
+                "schema_validation_enabled": self.schema_validation_enabled,
+                "resume_schema_path": self.resume_schema_path,
+                "schema_validation_max_retries": self.schema_validation_max_retries,
+                "recommendations_enabled": self.recommendations_enabled,
+                "recommendations_max_items": self.recommendations_max_items,
+                "output_subdir_pattern": self.output_subdir_pattern,
+                "write_score_summary_file": self.write_score_summary_file,
             },
             "job_search": {
                 "max_job_results_per_search": self.max_job_results_per_search,
@@ -541,6 +591,41 @@ def _build_config(raw: Dict[str, Any]) -> Config:
             DEFAULTS["processing"]["min_score_delta"],
         )
     )
+
+    # Iteration strategy (advanced)
+    iteration_strategy = (
+        str(
+            _deep_get(
+                raw,
+                ("processing", "iteration_strategy"),
+                DEFAULTS["processing"]["iteration_strategy"],
+            )
+        )
+        .strip()
+        .lower()
+    )
+    iteration_patience = int(
+        _deep_get(
+            raw,
+            ("processing", "iteration_patience"),
+            DEFAULTS["processing"]["iteration_patience"],
+        )
+    )
+    stop_on_regression = bool(
+        _deep_get(
+            raw,
+            ("processing", "stop_on_regression"),
+            DEFAULTS["processing"]["stop_on_regression"],
+        )
+    )
+    max_regressions = int(
+        _deep_get(
+            raw,
+            ("processing", "max_regressions"),
+            DEFAULTS["processing"]["max_regressions"],
+        )
+    )
+
     structured_output_format = str(
         _deep_get(
             raw,
@@ -548,6 +633,57 @@ def _build_config(raw: Dict[str, Any]) -> Config:
             DEFAULTS["processing"]["structured_output_format"],
         )
     ).lower()
+
+    # Schema validation / recommendations / output layout (processing)
+    schema_validation_enabled = bool(
+        _deep_get(
+            raw,
+            ("processing", "schema_validation_enabled"),
+            DEFAULTS["processing"]["schema_validation_enabled"],
+        )
+    )
+    resume_schema_path = str(
+        _deep_get(
+            raw,
+            ("processing", "resume_schema_path"),
+            DEFAULTS["processing"]["resume_schema_path"],
+        )
+    )
+    schema_validation_max_retries = int(
+        _deep_get(
+            raw,
+            ("processing", "schema_validation_max_retries"),
+            DEFAULTS["processing"]["schema_validation_max_retries"],
+        )
+    )
+    recommendations_enabled = bool(
+        _deep_get(
+            raw,
+            ("processing", "recommendations_enabled"),
+            DEFAULTS["processing"]["recommendations_enabled"],
+        )
+    )
+    recommendations_max_items = int(
+        _deep_get(
+            raw,
+            ("processing", "recommendations_max_items"),
+            DEFAULTS["processing"]["recommendations_max_items"],
+        )
+    )
+    output_subdir_pattern = str(
+        _deep_get(
+            raw,
+            ("processing", "output_subdir_pattern"),
+            DEFAULTS["processing"]["output_subdir_pattern"],
+        )
+    )
+    write_score_summary_file = bool(
+        _deep_get(
+            raw,
+            ("processing", "write_score_summary_file"),
+            DEFAULTS["processing"]["write_score_summary_file"],
+        )
+    )
 
     # Job search
     max_job_results_per_search = int(
@@ -567,6 +703,13 @@ def _build_config(raw: Dict[str, Any]) -> Config:
         state_file=state_file,
         saved_searches_file=saved_searches_file,
         scoring_weights_file=scoring_weights_file,
+        schema_validation_enabled=schema_validation_enabled,
+        resume_schema_path=resume_schema_path,
+        schema_validation_max_retries=schema_validation_max_retries,
+        recommendations_enabled=recommendations_enabled,
+        recommendations_max_items=recommendations_max_items,
+        output_subdir_pattern=output_subdir_pattern,
+        write_score_summary_file=write_score_summary_file,
         ai_provider=ai_provider,
         model_name=model_name,
         temperature=temperature,
@@ -579,6 +722,10 @@ def _build_config(raw: Dict[str, Any]) -> Config:
         target_score=target_score,
         max_iterations=max_iterations,
         min_score_delta=min_score_delta,
+        iteration_strategy=iteration_strategy,
+        iteration_patience=iteration_patience,
+        stop_on_regression=stop_on_regression,
+        max_regressions=max_regressions,
         structured_output_format=structured_output_format,
         max_job_results_per_search=max_job_results_per_search,
     )
@@ -628,6 +775,58 @@ def _apply_cli_overrides(raw: Dict[str, Any], cli_args: Any) -> Dict[str, Any]:
     _set_if_present(data, args, ("processing", "target_score"), "target_score")
     _set_if_present(data, args, ("processing", "max_iterations"), "max_iterations")
     _set_if_present(data, args, ("processing", "min_score_delta"), "min_score_delta")
+
+    # Iteration strategy (advanced)
+    _set_if_present(
+        data, args, ("processing", "iteration_strategy"), "iteration_strategy"
+    )
+    _set_if_present(
+        data, args, ("processing", "iteration_patience"), "iteration_patience"
+    )
+    _set_if_present(
+        data, args, ("processing", "stop_on_regression"), "stop_on_regression"
+    )
+    _set_if_present(data, args, ("processing", "max_regressions"), "max_regressions")
+
+    _set_if_present(
+        data,
+        args,
+        ("processing", "schema_validation_enabled"),
+        "schema_validation_enabled",
+    )
+    _set_if_present(
+        data, args, ("processing", "resume_schema_path"), "resume_schema_path"
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "schema_validation_max_retries"),
+        "schema_validation_max_retries",
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "recommendations_enabled"),
+        "recommendations_enabled",
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "recommendations_max_items"),
+        "recommendations_max_items",
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "output_subdir_pattern"),
+        "output_subdir_pattern",
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "write_score_summary_file"),
+        "write_score_summary_file",
+    )
     _set_if_present(
         data,
         args,
@@ -830,10 +1029,74 @@ if __name__ == "__main__":
         type=float,
         help="Minimum score delta required to keep iterating.",
     )
+
+    # Iteration strategy (advanced)
+    parser.add_argument(
+        "--iteration_strategy",
+        type=str,
+        help='Iteration strategy: "best_of", "first_hit", or "patience".',
+    )
+    parser.add_argument(
+        "--iteration_patience",
+        type=int,
+        help="Stop after this many consecutive non-improving iterations (patience strategy).",
+    )
+    parser.add_argument(
+        "--stop_on_regression",
+        action="store_true",
+        help="Stop iteration if regressions exceed the configured threshold.",
+    )
+    parser.add_argument(
+        "--max_regressions",
+        type=int,
+        help="Maximum allowed regression count before stopping (when stop_on_regression is enabled).",
+    )
+
     parser.add_argument(
         "--structured_output_format",
         type=str,
         help='Structured output format: "json", "toml", or "both".',
+    )
+
+    # Schema validation (best-effort)
+    parser.add_argument(
+        "--schema_validation_enabled",
+        action="store_true",
+        help="Enable schema validation for AI-produced structured resume output.",
+    )
+    parser.add_argument(
+        "--resume_schema_path",
+        type=str,
+        help="Path to a resume schema file used for validation (leave empty to disable).",
+    )
+    parser.add_argument(
+        "--schema_validation_max_retries",
+        type=int,
+        help="Max retries to attempt schema-fixing when validation fails.",
+    )
+
+    # Recommendations
+    parser.add_argument(
+        "--recommendations_enabled",
+        action="store_true",
+        help="Enable generating actionable recommendations from score breakdowns.",
+    )
+    parser.add_argument(
+        "--recommendations_max_items",
+        type=int,
+        help="Maximum number of recommendation items to generate.",
+    )
+
+    # Output layout
+    parser.add_argument(
+        "--output_subdir_pattern",
+        type=str,
+        help='Output subdirectory pattern under output_folder (e.g., "{resume_name}/{job_title}/{timestamp}").',
+    )
+    parser.add_argument(
+        "--write_score_summary_file",
+        action="store_true",
+        help="Write a separate score summary file alongside outputs.",
     )
 
     parser.add_argument(

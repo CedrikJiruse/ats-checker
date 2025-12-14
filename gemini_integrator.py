@@ -1,14 +1,56 @@
-import json  # Keep json for parsing Gemini's response
-import logging
-import os
-from typing import Any, Callable, Dict, List, Optional, Tuple
+"""
+Gemini integrator (refactored) using the pluggable AgentRegistry + GeminiAgent.
 
-import google.generativeai as genai
+Why this exists
+---------------
+The rest of the codebase wants a small, stable surface area for AI operations:
+- Enhance a resume into a structured JSON object
+- Summarize a job description
+- Iteratively revise a structured resume JSON until a target score is reached
+
+This module keeps that surface area but delegates the provider details to:
+- `agents.py`:
+    - AgentRegistry
+    - AgentConfig / GeminiAgent
+    - JSON fencing/validation helpers
+
+Agent configuration
+-------------------
+`ResumeProcessor` passes `config.ai_agents` into this class. That dict is expected to look like:
+
+{
+  "enhancer": {"provider": "gemini", "model_name": "...", "role": "resume_enhancement", ...},
+  "job_summarizer": {"provider": "gemini", "model_name": "...", "role": "job_summary", ...},
+  "reviser": {"provider": "gemini", "model_name": "...", "role": "resume_revision", ...},
+}
+
+This module will apply sensible defaults:
+- enhancer/reviser are JSON-required
+- job_summarizer is plain text
+
+Security
+--------
+Requires `GEMINI_API_KEY` to be set in the environment. The underlying Gemini agent
+will enforce this.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any, Callable, Dict, List, Optional
+
+from agents import Agent, AgentRegistry
 
 logger = logging.getLogger(__name__)
 
 
 class GeminiAPIIntegrator:
+    """
+    Backward-compatible integrator that exposes the previous API, but uses the new
+    pluggable agent layer internally.
+    """
+
     def __init__(
         self,
         model_name: str = "gemini-pro",
@@ -19,197 +61,137 @@ class GeminiAPIIntegrator:
         agents: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         """
-        Gemini API integrator with lightweight multi-agent support.
-
-        Agents are separate model instances that can use different Gemini models
-        and/or generation configs. This enables:
-        - `enhancer`: default resume enhancement (backward-compatible with `self.model`)
-        - `job_summarizer`: job description summarization
-        - `reviser`: iterative resume revision based on feedback/score
-
         Args:
-            model_name: Default Gemini model name.
+            model_name: Default Gemini model for agents that don't override it.
             temperature/top_p/top_k/max_output_tokens: Default generation config.
-            agents: Optional dict like:
-                {
-                    "enhancer": {"provider": "gemini", "model_name": "...", "temperature": 0.7, ...},
-                    "job_summarizer": {...},
-                    "reviser": {...},
-                }
+            agents: Optional dict of agent configs (typically from TOML config.ai.agents.*).
         """
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            logger.error(
-                "GEMINI_API_KEY not found. Please set it as an environment variable."
-            )
-            raise ValueError(
-                "GEMINI_API_KEY not found. Please set it as an environment variable."
-            )
-        genai.configure(api_key=api_key)
-
         self._default_model_name = model_name
-        self._default_generation_kwargs = {
+        self._default_generation = {
             "temperature": temperature,
             "top_p": top_p,
             "top_k": top_k,
             "max_output_tokens": max_output_tokens,
         }
 
-        # Default agent definitions (can be overridden by `agents`)
-        default_agents: Dict[str, Dict[str, Any]] = {
-            "enhancer": {"provider": "gemini", "model_name": model_name},
-            "job_summarizer": {"provider": "gemini", "model_name": model_name},
-            "reviser": {"provider": "gemini", "model_name": model_name},
-        }
-        if isinstance(agents, dict):
-            for name, cfg in agents.items():
-                if isinstance(name, str) and isinstance(cfg, dict):
-                    merged = dict(default_agents.get(name, {}))
-                    merged.update(cfg)
-                    default_agents[name] = merged
+        agents_cfg = self._normalize_agents_config(agents)
 
-        self.agents = default_agents
-        self._models: Dict[str, Any] = {}
-
-        # Build models per agent (Gemini only)
-        for agent_name, cfg in self.agents.items():
-            if not isinstance(cfg, dict):
-                continue
-            provider = str(cfg.get("provider", "gemini")).lower()
-            if provider != "gemini":
-                continue
-
-            agent_model_name = str(cfg.get("model_name") or model_name)
-            gen_kwargs = dict(self._default_generation_kwargs)
-            # Optional per-agent overrides
-            for k in ("temperature", "top_p", "top_k", "max_output_tokens"):
-                if k in cfg and cfg[k] is not None:
-                    gen_kwargs[k] = cfg[k]
-
-            self._models[agent_name] = genai.GenerativeModel(
-                model_name=agent_model_name,
-                generation_config=genai.GenerationConfig(**gen_kwargs),
-            )
-
-        # Backward compatibility: `self.model` remains the default enhancement model
-        self.model = self._models.get("enhancer") or genai.GenerativeModel(
-            model_name=model_name,
-            generation_config=genai.GenerationConfig(**self._default_generation_kwargs),
+        # Build the registry (this constructs provider-specific clients lazily per agent).
+        self.registry = AgentRegistry.from_config_dict(
+            agents_cfg,
+            default_provider="gemini",
+            default_model_name=self._default_model_name,
+            default_generation=self._default_generation,
         )
+
+        # Keep a backward-compatible attribute name so older code/tests don't break.
+        # Previously: self.model was a google.generativeai model; now it is the enhancer agent.
+        self.model = self._get_agent("enhancer")
 
         logger.info(
-            "GeminiAPIIntegrator initialized. default_model=%s agents=%s",
-            model_name,
-            sorted(list(self._models.keys())),
+            "GeminiAPIIntegrator ready. Agents registered: %s",
+            ", ".join(self.registry.list()),
         )
+
+    # ----------------------------
+    # Agent registry helpers
+    # ----------------------------
+
+    def _normalize_agents_config(
+        self, agents: Optional[Dict[str, Dict[str, Any]]]
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Apply defaults and ensure key agent behaviors:
+        - enhancer/reviser: require_json=True
+        - job_summarizer: require_json=False
+        """
+        # Baseline agents
+        cfg: Dict[str, Dict[str, Any]] = {
+            "enhancer": {"provider": "gemini", "role": "resume_enhancement"},
+            "job_summarizer": {"provider": "gemini", "role": "job_summary"},
+            "reviser": {"provider": "gemini", "role": "resume_revision"},
+        }
+
+        # Merge user config (if provided)
+        if isinstance(agents, dict):
+            for name, user_cfg in agents.items():
+                if not isinstance(name, str) or not isinstance(user_cfg, dict):
+                    continue
+                merged = dict(cfg.get(name, {}))
+                merged.update(user_cfg)
+                cfg[name] = merged
+
+        # Ensure model_name is set if omitted
+        for name in list(cfg.keys()):
+            if "model_name" not in cfg[name] or not cfg[name].get("model_name"):
+                cfg[name]["model_name"] = self._default_model_name
+
+        # Enforce JSON requirement for certain roles
+        cfg.setdefault("enhancer", {})
+        cfg.setdefault("reviser", {})
+        cfg["enhancer"].setdefault("require_json", True)
+        cfg["reviser"].setdefault("require_json", True)
+
+        # job_summarizer should be plain text
+        cfg.setdefault("job_summarizer", {})
+        cfg["job_summarizer"].setdefault("require_json", False)
+
+        return cfg
+
+    def _get_agent(self, agent_name: str) -> Agent:
+        """
+        Get a named agent, falling back to enhancer if not present.
+        """
+        try:
+            return self.registry.get(agent_name)
+        except Exception:
+            return self.registry.get("enhancer")
+
+    # ----------------------------
+    # Prompt construction
+    # ----------------------------
 
     def _craft_prompt(
         self, resume_content: str, job_description: Optional[str] = None
     ) -> str:
         """
-        Crafts a detailed prompt for the Gemini API to enhance and format resume content,
-        optionally tailoring it to a specific job description.
-
-        Args:
-            resume_content: The raw resume content as a string.
-            job_description: Optional. The text of the job description to tailor the resume to.
-
-        Returns:
-            A string prompt for the Gemini API.
+        Craft prompt for resume enhancement to structured JSON.
         """
-        try:
-            prompt_parts = [
-                "You are an expert resume builder. Your task is to take the provided resume content "
-                "and enhance it for clarity, impact, and professional presentation. "
-                "Focus on action verbs, quantifiable achievements, and industry-standard formatting. "
-                "The output should be a well-structured JSON object representing the enhanced resume. "
-                "The JSON should have the following top-level keys: 'personal_info', 'summary', 'experience', 'education', 'skills', 'projects'. "
-                "Each section should be an array of objects or a single object as appropriate. "
-                "For example, 'personal_info' should be an object with keys like 'name', 'email', 'phone', 'linkedin', 'github', 'portfolio'. "
-                "The 'experience', 'education', and 'projects' sections should be arrays of objects, each with relevant details. "
-                "The 'skills' section should be an array of strings. "
-            ]
+        prompt_parts = [
+            "You are an expert resume builder. Your task is to take the provided resume content "
+            "and enhance it for clarity, impact, and professional presentation. "
+            "Focus on action verbs, quantifiable achievements, and industry-standard formatting. "
+            "The output should be a well-structured JSON object representing the enhanced resume. "
+            "The JSON should have the following top-level keys: 'personal_info', 'summary', 'experience', 'education', 'skills', 'projects'. "
+            "Each section should be an array of objects or a single object as appropriate. "
+            "For example, 'personal_info' should be an object with keys like 'name', 'email', 'phone', 'linkedin', 'github', 'portfolio'. "
+            "The 'experience', 'education', and 'projects' sections should be arrays of objects, each with relevant details. "
+            "The 'skills' section should be an array of strings. "
+        ]
 
-            if job_description:
-                prompt_parts.append(
-                    "Crucially, tailor the resume specifically to the following job description. "
-                    "Highlight relevant skills and experiences, and rephrase accomplishments "
-                    "to align with the requirements and keywords in the job description. "
-                    "Here is the job description:\n\n"
-                    f"{job_description}\n\n"
-                )
-
+        if job_description:
             prompt_parts.append(
-                "Here is the raw resume content:\n"
-                f"{resume_content}\n\n"
-                "The output MUST be a raw JSON object, with no markdown formatting (e.g., no ```json around it) or conversational filler."
+                "Crucially, tailor the resume specifically to the following job description. "
+                "Highlight relevant skills and experiences, and rephrase accomplishments "
+                "to align with the requirements and keywords in the job description. "
+                "Here is the job description:\n\n"
+                f"{job_description}\n\n"
             )
-            prompt = "".join(prompt_parts)
-            logger.debug("Gemini API prompt crafted successfully.")
-            return prompt
-        except Exception as e:
-            logger.error(f"Error crafting Gemini API prompt: {e}", exc_info=True)
-            raise
 
-    def enhance_resume(
-        self, resume_content: str, job_description: Optional[str] = None
-    ) -> str:
-        """
-        Sends resume content to the Gemini API for enhancement and returns the processed data as a JSON string.
-        Optionally tailors the resume to a specific job description.
+        prompt_parts.append(
+            "Here is the raw resume content:\n"
+            f"{resume_content}\n\n"
+            "The output MUST be a raw JSON object, with no markdown formatting (e.g., no ```json around it) or conversational filler."
+        )
 
-        Args:
-            resume_content: The raw resume content as a string.
-            job_description: Optional. The text of the job description to tailor the resume to.
-
-        Returns:
-            The enhanced resume data as a JSON string.
-
-        Raises:
-            Exception: If the Gemini API call fails or returns invalid JSON.
-        """
-        prompt = self._craft_prompt(resume_content, job_description)
-        try:
-            logger.info("Sending resume data to Gemini API for enhancement...")
-            response = self._get_agent_model("enhancer").generate_content(prompt)
-            enhanced_resume_str = response.text.strip()
-
-            # Attempt to extract JSON from markdown if present
-            if enhanced_resume_str.startswith(
-                "```json"
-            ) and enhanced_resume_str.endswith("```"):
-                enhanced_resume_str = enhanced_resume_str[7:-3].strip()
-            elif enhanced_resume_str.startswith("```") and enhanced_resume_str.endswith(
-                "```"
-            ):
-                # Catch cases where the language might be omitted, but it's still a code block
-                enhanced_resume_str = enhanced_resume_str[3:-3].strip()
-
-            # Validate if the response is valid JSON
-            json.loads(enhanced_resume_str)
-            logger.info(
-                "Successfully received and validated enhanced resume data from Gemini API."
-            )
-            return enhanced_resume_str
-        except Exception as e:
-            logger.error(
-                f"Error calling Gemini API or parsing response: {e}", exc_info=True
-            )
-            raise
-
-    def _get_agent_model(self, agent_name: str):
-        """
-        Return the model instance for a given agent name.
-        Falls back to `self.model` for unknown/missing agents.
-        """
-        return self._models.get(agent_name) or self.model
+        return "".join(prompt_parts)
 
     def _craft_job_summary_prompt(self, job_description: str) -> str:
         """
-        Create a prompt that produces a compact, actionable job summary.
-        Output is plain text (not JSON) to keep it easy to read in the CLI.
+        Prompt that produces a compact, actionable job summary.
+        Output is plain text (not JSON) for easy display.
         """
-        prompt = (
+        return (
             "You are an expert technical recruiter.\n"
             "Summarize the following job description in a compact, actionable way.\n\n"
             "Return ONLY plain text with the following sections:\n"
@@ -221,22 +203,6 @@ class GeminiAPIIntegrator:
             "Job description:\n"
             f"{job_description}\n"
         )
-        return prompt
-
-    def summarize_job_description(self, job_description: str) -> str:
-        """
-        Summarize a job description using the `job_summarizer` agent.
-        """
-        prompt = self._craft_job_summary_prompt(job_description)
-        try:
-            logger.info("Sending job description to Gemini for summarization...")
-            response = self._get_agent_model("job_summarizer").generate_content(prompt)
-            return (response.text or "").strip()
-        except Exception as e:
-            logger.error(
-                f"Error calling Gemini API for job summarization: {e}", exc_info=True
-            )
-            raise
 
     def _craft_revision_prompt(
         self,
@@ -245,8 +211,8 @@ class GeminiAPIIntegrator:
         goals: Optional[List[str]] = None,
     ) -> str:
         """
-        Create a prompt for iterative revision.
-        The model is required to output a raw JSON object only.
+        Prompt for iterative revision of an already-structured resume JSON.
+        The model is required to output raw JSON only.
         """
         goals = goals or [
             "Improve ATS keyword alignment without lying",
@@ -273,8 +239,45 @@ class GeminiAPIIntegrator:
 
         parts.append("\nCurrent resume JSON:\n")
         parts.append(f"{enhanced_resume_json}\n")
-
         return "".join(parts)
+
+    # ----------------------------
+    # Public API (backward compatible)
+    # ----------------------------
+
+    def enhance_resume(
+        self, resume_content: str, job_description: Optional[str] = None
+    ) -> str:
+        """
+        Enhance a raw resume to structured JSON (as a JSON string).
+
+        Returns:
+            JSON string (pretty printed).
+        """
+        prompt = self._craft_prompt(resume_content, job_description)
+        agent = self._get_agent("enhancer")
+
+        logger.info("Sending resume data to AI enhancer agent...")
+        text = agent.generate_text(prompt)
+
+        # Validate JSON (agent may already enforce it via require_json)
+        obj = json.loads(text)
+        if not isinstance(obj, dict):
+            raise ValueError(
+                "Enhanced resume output must be a JSON object at the top level."
+            )
+        return json.dumps(obj, ensure_ascii=False, indent=2)
+
+    def summarize_job_description(self, job_description: str) -> str:
+        """
+        Summarize a job description using the job_summarizer agent.
+        """
+        prompt = self._craft_job_summary_prompt(job_description)
+        agent = self._get_agent("job_summarizer")
+
+        logger.info("Sending job description to AI job_summarizer agent...")
+        text = agent.generate_text(prompt)
+        return (text or "").strip()
 
     def revise_resume(
         self,
@@ -283,35 +286,38 @@ class GeminiAPIIntegrator:
         goals: Optional[List[str]] = None,
     ) -> str:
         """
-        Revise an already-structured resume JSON using the `reviser` agent.
-        Returns a JSON string (validated).
+        Revise an already-structured resume JSON using the reviser agent.
+
+        Args:
+            enhanced_resume_json: JSON string representing the structured resume.
+            job_description: Optional job description content.
+            goals: Optional list of goals to guide revision.
+
+        Returns:
+            Revised resume JSON string (pretty printed).
         """
-        # Validate the input is JSON so the model gets clean structure
-        json.loads(enhanced_resume_json)
+        # Validate input JSON
+        base = json.loads(enhanced_resume_json)
+        if not isinstance(base, dict):
+            raise ValueError("Input to revise_resume must be a JSON object.")
 
         prompt = self._craft_revision_prompt(
-            enhanced_resume_json=enhanced_resume_json,
+            enhanced_resume_json=json.dumps(base, ensure_ascii=False, indent=2),
             job_description=job_description,
             goals=goals,
         )
-        try:
-            logger.info("Sending resume JSON to Gemini for revision...")
-            response = self._get_agent_model("reviser").generate_content(prompt)
-            revised = (response.text or "").strip()
+        agent = self._get_agent("reviser")
 
-            # Strip markdown code fences if the model adds them
-            if revised.startswith("```json") and revised.endswith("```"):
-                revised = revised[7:-3].strip()
-            elif revised.startswith("```") and revised.endswith("```"):
-                revised = revised[3:-3].strip()
+        logger.info("Sending resume JSON to AI reviser agent...")
+        text = agent.generate_text(prompt)
 
-            json.loads(revised)
-            return revised
-        except Exception as e:
-            logger.error(
-                f"Error calling Gemini API for resume revision: {e}", exc_info=True
+        # Validate JSON
+        obj = json.loads(text)
+        if not isinstance(obj, dict):
+            raise ValueError(
+                "Revised resume output must be a JSON object at the top level."
             )
-            raise
+        return json.dumps(obj, ensure_ascii=False, indent=2)
 
     def revise_resume_until_score_reached(
         self,
@@ -399,54 +405,3 @@ class GeminiAPIIntegrator:
             "history": history,
             "stopped_reason": "max_iterations",
         }
-
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
-    # Set your GEMINI_API_KEY environment variable before running this example
-    # os.environ["GEMINI_API_KEY"] = "YOUR_GEMINI_API_KEY"
-
-    try:
-        integrator = GeminiAPIIntegrator(
-            model_name="gemini-1.5-flash-latest",
-            temperature=0.7,
-            top_p=0.95,
-            top_k=40,
-            max_output_tokens=8192,
-        )
-
-        sample_resume_content = """
-        John Doe
-        Software Engineer
-        Summary: Software engineer with experience in Python.
-        Experience: Tech Corp, Software Engineer, 2020-2023. Developed web applications.
-        Education: University of Example, M.Sc. Computer Science, 2019.
-        Skills: Python, JavaScript.
-        """
-
-        sample_job_description = (
-            "Looking for a software engineer with strong Python skills."
-        )
-
-        logger.info(
-            "Sending resume data to Gemini API for enhancement (without job description)..."
-        )
-        enhanced_data_no_jd_str = integrator.enhance_resume(sample_resume_content)
-        logger.info("\nEnhanced Resume Data (without JD):")
-        logger.info(enhanced_data_no_jd_str)
-
-        logger.info(
-            "Sending resume data to Gemini API for enhancement (with job description)..."
-        )
-        enhanced_data_with_jd_str = integrator.enhance_resume(
-            sample_resume_content, job_description=sample_job_description
-        )
-        logger.info("\nEnhanced Resume Data (with JD):")
-        logger.info(enhanced_data_with_jd_str)
-
-    except ValueError as e:
-        logger.error(f"Configuration Error: {e}")
-    except Exception as e:
-        logger.error(f"An error occurred during API call: {e}")

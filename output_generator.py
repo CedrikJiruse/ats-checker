@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,10 @@ def _sanitize_for_toml(value: Any) -> Any:
 
 class OutputGenerator:
     def __init__(
-        self, output_folder: str = "output", structured_output_format: str = "json"
+        self,
+        output_folder: str = "output",
+        structured_output_format: str = "json",
+        output_subdir_pattern: str = "{resume_name}/{job_title}/{timestamp}",
     ):
         """
         Args:
@@ -56,16 +60,99 @@ class OutputGenerator:
             structured_output_format: "json" (default), "toml", or "both".
                 - "toml": write TOML first, fallback to JSON if TOML writing fails
                 - "both": write both TOML and JSON (returns TOML path)
+            output_subdir_pattern: Relative subdirectory pattern under output_folder.
+                Supported placeholders:
+                  - {resume_name}: resume filename without extension
+                  - {job_title}: job title token passed in by caller
+                  - {timestamp}: shared timestamp for a bundle of outputs
         """
         self.output_folder = os.path.abspath(output_folder)
         os.makedirs(self.output_folder, exist_ok=True)
         self.structured_output_format = (structured_output_format or "json").lower()
+        self.output_subdir_pattern = (
+            output_subdir_pattern or "{resume_name}/{job_title}/{timestamp}"
+        )
+
+        # Bundle context for sharing timestamps across sequential outputs
+        # (e.g., structured output then text output) without changing call sites.
+        self._bundle_key: Optional[str] = None
+        self._bundle_timestamp: Optional[str] = None
+
         logger.info(
             f"OutputGenerator initialized with output folder: {self.output_folder}"
         )
 
+    def _now_timestamp(self) -> str:
+        return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def _sanitize_path_segment(self, segment: str) -> str:
+        # Keep it Windows-safe and filesystem-safe.
+        # Replace reserved chars: <>:"/\|?*
+        bad = '<>:"/\\|?*'
+        out = []
+        for ch in str(segment or ""):
+            out.append("_" if ch in bad else ch)
+        s = "".join(out).strip()
+        return s or "unknown"
+
+    def _format_output_subdir(
+        self, resume_filename: str, job_title: str, timestamp: str
+    ) -> str:
+        resume_name = os.path.splitext(os.path.basename(resume_filename))[0]
+        values = {
+            "resume_name": self._sanitize_path_segment(resume_name),
+            "job_title": self._sanitize_path_segment(job_title),
+            "timestamp": self._sanitize_path_segment(timestamp),
+        }
+
+        try:
+            rel = self.output_subdir_pattern.format(**values)
+        except Exception:
+            rel = "{resume_name}/{job_title}/{timestamp}".format(**values)
+
+        # Normalize separators and sanitize each segment
+        rel = rel.replace("\\", "/")
+        parts = [p for p in rel.split("/") if p and p.strip()]
+        safe_parts = [self._sanitize_path_segment(p) for p in parts]
+        return os.path.join(*safe_parts) if safe_parts else values["timestamp"]
+
+    def _bundle_key_for(self, resume_filename: str, job_title: str) -> str:
+        return f"{os.path.abspath(resume_filename)}|{job_title}"
+
+    def _get_or_begin_bundle_timestamp(
+        self,
+        resume_filename: str,
+        job_title: str,
+        timestamp: Optional[str] = None,
+    ) -> str:
+        if timestamp:
+            self._bundle_key = self._bundle_key_for(resume_filename, job_title)
+            self._bundle_timestamp = timestamp
+            return timestamp
+
+        key = self._bundle_key_for(resume_filename, job_title)
+        if self._bundle_key == key and self._bundle_timestamp:
+            return self._bundle_timestamp
+
+        ts = self._now_timestamp()
+        self._bundle_key = key
+        self._bundle_timestamp = ts
+        return ts
+
+    def _resolve_output_dir(
+        self, resume_filename: str, job_title: str, timestamp: str
+    ) -> str:
+        rel = self._format_output_subdir(resume_filename, job_title, timestamp)
+        out_dir = os.path.join(self.output_folder, rel)
+        os.makedirs(out_dir, exist_ok=True)
+        return out_dir
+
     def generate_text_output(
-        self, resume_data_str: str, resume_filename: str, job_title: str
+        self,
+        resume_data_str: str,
+        resume_filename: str,
+        job_title: str,
+        timestamp: Optional[str] = None,
     ) -> str:
         """
         Generates a text file from a JSON string of structured resume data.
@@ -91,7 +178,10 @@ class OutputGenerator:
 
         base_name = os.path.splitext(os.path.basename(resume_filename))
         output_filename = f"{base_name[0]}_{job_title}_enhanced.txt"
-        filepath = os.path.join(self.output_folder, output_filename)
+
+        ts = self._get_or_begin_bundle_timestamp(resume_filename, job_title, timestamp)
+        output_dir = self._resolve_output_dir(resume_filename, job_title, ts)
+        filepath = os.path.join(output_dir, output_filename)
 
         try:
             with open(filepath, "w", encoding="utf-8") as f:
@@ -169,6 +259,53 @@ class OutputGenerator:
                 if skills:
                     f.write("Skills:\n")
                     f.write(f"{', '.join(skills)}\n\n")
+
+                # Keyword Match Highlighting (optional)
+                # If match scoring details exist, surface matched/missing keywords to make the TXT output actionable.
+                scoring = resume_data.get("_scoring") or resume_data.get("scoring")
+                if isinstance(scoring, dict):
+                    match_rep = None
+                    for candidate_key in ("match_report", "match"):
+                        candidate = scoring.get(candidate_key)
+                        if isinstance(candidate, dict):
+                            match_rep = candidate
+                            break
+
+                    if isinstance(match_rep, dict):
+                        categories = match_rep.get("categories")
+                        if isinstance(categories, list):
+                            kw_details = None
+                            for cat in categories:
+                                if not isinstance(cat, dict):
+                                    continue
+                                if cat.get("name") == "keyword_overlap":
+                                    details = cat.get("details")
+                                    if isinstance(details, dict):
+                                        kw_details = details
+                                    break
+
+                            if isinstance(kw_details, dict):
+                                missing = kw_details.get("sample_missing")
+                                overlap = kw_details.get("sample_overlap")
+
+                                has_overlap = (
+                                    isinstance(overlap, list) and len(overlap) > 0
+                                )
+                                has_missing = (
+                                    isinstance(missing, list) and len(missing) > 0
+                                )
+
+                                if has_overlap or has_missing:
+                                    f.write("Keyword Match:\n")
+                                    if has_overlap:
+                                        f.write(
+                                            f"  Matched: {', '.join(str(x) for x in overlap[:20])}\n"
+                                        )
+                                    if has_missing:
+                                        f.write(
+                                            f"  Missing: {', '.join(str(x) for x in missing[:20])}\n"
+                                        )
+                                    f.write("\n")
 
                 # Projects
                 projects = resume_data.get("projects", [])
@@ -261,7 +398,11 @@ class OutputGenerator:
             raise
 
     def generate_json_output(
-        self, resume_data_str: str, resume_filename: str, job_title: str
+        self,
+        resume_data_str: str,
+        resume_filename: str,
+        job_title: str,
+        timestamp: Optional[str] = None,
     ) -> str:
         """
         Generates a JSON file from a JSON string of structured resume data.
@@ -287,7 +428,10 @@ class OutputGenerator:
 
         base_name = os.path.splitext(os.path.basename(resume_filename))
         output_filename = f"{base_name[0]}_{job_title}_enhanced.json"
-        filepath = os.path.join(self.output_folder, output_filename)
+
+        ts = self._get_or_begin_bundle_timestamp(resume_filename, job_title, timestamp)
+        output_dir = self._resolve_output_dir(resume_filename, job_title, ts)
+        filepath = os.path.join(output_dir, output_filename)
 
         try:
             with open(filepath, "w", encoding="utf-8") as f:
@@ -306,7 +450,11 @@ class OutputGenerator:
             raise
 
     def generate_toml_output(
-        self, resume_data_str: str, resume_filename: str, job_title: str
+        self,
+        resume_data_str: str,
+        resume_filename: str,
+        job_title: str,
+        timestamp: Optional[str] = None,
     ) -> str:
         """
         Generates a TOML file from a JSON string of structured resume data.
@@ -332,7 +480,10 @@ class OutputGenerator:
 
         base_name = os.path.splitext(os.path.basename(resume_filename))
         output_filename = f"{base_name[0]}_{job_title}_enhanced.toml"
-        filepath = os.path.join(self.output_folder, output_filename)
+
+        ts = self._get_or_begin_bundle_timestamp(resume_filename, job_title, timestamp)
+        output_dir = self._resolve_output_dir(resume_filename, job_title, ts)
+        filepath = os.path.join(output_dir, output_filename)
 
         if toml_io is None:
             raise RuntimeError(
@@ -358,7 +509,11 @@ class OutputGenerator:
             raise
 
     def generate_structured_output(
-        self, resume_data_str: str, resume_filename: str, job_title: str
+        self,
+        resume_data_str: str,
+        resume_filename: str,
+        job_title: str,
+        timestamp: Optional[str] = None,
     ) -> str:
         """
         Generate structured output based on `self.structured_output_format`.
@@ -372,29 +527,54 @@ class OutputGenerator:
         """
         fmt = (self.structured_output_format or "json").lower()
 
+        # Begin/continue a bundle so subsequent outputs (e.g. TXT) share the same timestamp.
+        ts = self._get_or_begin_bundle_timestamp(resume_filename, job_title, timestamp)
+
+        # Best-effort: embed a shared timestamp into the structured resume under `_meta.timestamp`
+        # so it is preserved inside TOML/JSON as well.
+        try:
+            obj = json.loads(resume_data_str)
+            if isinstance(obj, dict):
+                meta = obj.get("_meta")
+                if not isinstance(meta, dict):
+                    meta = {}
+                if not meta.get("timestamp"):
+                    meta["timestamp"] = ts
+                if not meta.get("job_title"):
+                    meta["job_title"] = job_title
+                if not meta.get("source_resume"):
+                    meta["source_resume"] = os.path.basename(resume_filename)
+                obj["_meta"] = meta
+                resume_data_str = json.dumps(obj, ensure_ascii=False, indent=2)
+        except Exception:
+            # If parsing fails, downstream generators will raise as before.
+            pass
+
         if fmt == "json":
             return self.generate_json_output(
-                resume_data_str, resume_filename, job_title
+                resume_data_str, resume_filename, job_title, timestamp=ts
             )
 
         if fmt == "toml":
             try:
                 return self.generate_toml_output(
-                    resume_data_str, resume_filename, job_title
+                    resume_data_str, resume_filename, job_title, timestamp=ts
                 )
             except Exception as e:
                 logger.warning(f"TOML generation failed, falling back to JSON: {e}")
                 return self.generate_json_output(
-                    resume_data_str, resume_filename, job_title
+                    resume_data_str, resume_filename, job_title, timestamp=ts
                 )
 
         if fmt == "both":
             toml_path = self.generate_toml_output(
-                resume_data_str, resume_filename, job_title
+                resume_data_str, resume_filename, job_title, timestamp=ts
             )
             # Always attempt JSON as well; if it fails, TOML is still returned.
             try:
-                self.generate_json_output(resume_data_str, resume_filename, job_title)
+                self.generate_json_output(
+                    resume_data_str, resume_filename, job_title, timestamp=ts
+                )
             except Exception as e:
                 logger.warning(f"JSON generation failed after TOML succeeded: {e}")
             return toml_path

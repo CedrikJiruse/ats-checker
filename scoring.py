@@ -726,6 +726,7 @@ def _match_keyword_overlap(
         return 0.0, {"reason": "job_has_no_tokens"}
 
     overlap = job_tokens.intersection(resume_tokens)
+    missing = job_tokens.difference(resume_tokens)
     ratio = len(overlap) / len(job_tokens)
 
     # Convert overlap ratio into a score; cap and shape slightly to avoid punishing long JDs too much.
@@ -735,8 +736,10 @@ def _match_keyword_overlap(
         "job_token_count": len(job_tokens),
         "resume_token_count": len(resume_tokens),
         "overlap_count": len(overlap),
+        "missing_count": len(missing),
         "overlap_ratio": ratio,
         "sample_overlap": sorted(list(overlap))[:20],
+        "sample_missing": sorted(list(missing))[:20],
     }
 
 

@@ -7,4 +7,5 @@ __pycache__/
 .vscode/
 .pytest_cache/
 WARP.md
+workspace/
 data/processed_resumes_state.toml

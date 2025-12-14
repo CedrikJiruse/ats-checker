@@ -74,6 +74,7 @@ from job_scrapers_improved import (
     LinkedInJobSpyScraper,
     ZipRecruiterJobSpyScraper,
 )
+from scoring import score_job
 
 logger = logging.getLogger(__name__)
 
@@ -472,8 +473,18 @@ class JobScraperManager:
             }
 
             # Store jobs as tables: [jobs.0], [jobs.1], ...
+            # Also attach job scoring so result files can be ranked and filtered later.
             for i, job in enumerate(jobs or []):
-                doc["jobs"][str(i)] = job.to_dict()
+                job_dict = job.to_dict()
+                try:
+                    job_report = score_job(job_dict)
+                    job_dict["job_score"] = float(job_report.total)
+                    job_dict["job_score_report"] = job_report.as_dict()
+                except Exception:
+                    # Scoring is best-effort; never fail saving due to scoring issues.
+                    pass
+
+                doc["jobs"][str(i)] = job_dict
 
             _toml_dump_file(filepath, doc)
             logger.info("Saved %d jobs to %s", len(jobs or []), filepath)
@@ -505,6 +516,126 @@ class JobScraperManager:
             return self._load_results_json(filepath)
         return self._load_results_toml(filepath)
 
+    def load_results_file_raw(self, filepath: str) -> Dict[str, Any]:
+        """
+        Load a results file and return the raw document structure.
+
+        TOML format:
+            {
+              "source": "...",
+              "timestamp": "...",
+              "filters": {...},
+              "jobs": {"0": {...}, "1": {...}, ...}
+            }
+
+        Legacy JSON format:
+            [ {job_dict}, {job_dict}, ... ]
+
+        For JSON, this method wraps the list into a TOML-like dict shape:
+            {"source": "", "timestamp": "", "filters": {}, "jobs": {"0": {...}, ...}}
+        """
+        _, ext = os.path.splitext(filepath.lower())
+        if ext == ".json":
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if not isinstance(data, list):
+                    return {"source": "", "timestamp": "", "filters": {}, "jobs": {}}
+                jobs_tbl: Dict[str, Any] = {}
+                for i, item in enumerate(data):
+                    if isinstance(item, dict):
+                        jobs_tbl[str(i)] = item
+                return {"source": "", "timestamp": "", "filters": {}, "jobs": jobs_tbl}
+            except Exception as e:
+                logger.error(
+                    "Error loading legacy JSON results (raw) from %s: %s",
+                    filepath,
+                    e,
+                    exc_info=True,
+                )
+                return {"source": "", "timestamp": "", "filters": {}, "jobs": {}}
+
+        try:
+            doc = _toml_load_file(filepath)
+            return doc if isinstance(doc, dict) else {}
+        except Exception as e:
+            logger.error(
+                "Error loading TOML results (raw) from %s: %s",
+                filepath,
+                e,
+                exc_info=True,
+            )
+            return {}
+
+    def rank_jobs_in_results(
+        self,
+        filepath: str,
+        top_n: int = 20,
+        recompute_missing_scores: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        Rank jobs in a saved results file by `job_score` descending.
+
+        If `job_score` is missing and `recompute_missing_scores=True`, it will be computed
+        using `score_job(job_dict)` and attached in-memory to the returned entries.
+
+        Returns:
+            [
+              {
+                "rank": 1,
+                "index": "0",
+                "job_score": 87.5,
+                "job": {... raw job dict ...}
+              },
+              ...
+            ]
+        """
+        doc = self.load_results_file_raw(filepath)
+        jobs_tbl = doc.get("jobs", {})
+        if not isinstance(jobs_tbl, dict):
+            return []
+
+        ranked: List[Dict[str, Any]] = []
+
+        for idx, job_data in jobs_tbl.items():
+            if not isinstance(job_data, dict):
+                continue
+
+            job_dict = dict(job_data)
+
+            score_val = job_dict.get("job_score")
+            job_score: Optional[float] = None
+            if isinstance(score_val, (int, float)):
+                job_score = float(score_val)
+
+            if job_score is None and recompute_missing_scores:
+                try:
+                    report = score_job(job_dict)
+                    job_score = float(report.total)
+                    job_dict["job_score"] = job_score
+                    job_dict["job_score_report"] = report.as_dict()
+                except Exception:
+                    job_score = None
+
+            ranked.append(
+                {
+                    "rank": None,
+                    "index": str(idx),
+                    "job_score": job_score if job_score is not None else float("-inf"),
+                    "job": job_dict,
+                }
+            )
+
+        ranked.sort(key=lambda x: x.get("job_score", float("-inf")), reverse=True)
+
+        if isinstance(top_n, int) and top_n > 0:
+            ranked = ranked[:top_n]
+
+        for i, entry in enumerate(ranked, start=1):
+            entry["rank"] = i
+
+        return ranked
+
     def _load_results_toml(self, filepath: str) -> List[JobPosting]:
         doc = _toml_load_file(filepath)
         jobs_tbl = doc.get("jobs", {})
@@ -519,7 +650,11 @@ class JobScraperManager:
         ):
             if isinstance(job_data, dict):
                 try:
-                    jobs.append(JobPosting(**job_data))
+                    # Tolerate extra fields (e.g., job_score, job_score_report) by filtering
+                    # to the dataclass fields JobPosting accepts.
+                    allowed = set(JobPosting.__dataclass_fields__.keys())
+                    filtered = {k: v for k, v in job_data.items() if k in allowed}
+                    jobs.append(JobPosting(**filtered))
                 except Exception:
                     # Be permissive: skip malformed entries
                     continue
@@ -539,7 +674,10 @@ class JobScraperManager:
             for item in data:
                 if isinstance(item, dict):
                     try:
-                        jobs.append(JobPosting(**item))
+                        # Tolerate extra fields (e.g., job_score) from newer result formats.
+                        allowed = set(JobPosting.__dataclass_fields__.keys())
+                        filtered = {k: v for k, v in item.items() if k in allowed}
+                        jobs.append(JobPosting(**filtered))
                     except Exception:
                         continue
             return jobs
@@ -598,7 +736,14 @@ class JobScraperManager:
                     "jobs": {},
                 }
                 for i, job in enumerate(jobs):
-                    doc["jobs"][str(i)] = job.to_dict()
+                    job_dict = job.to_dict()
+                    try:
+                        job_report = score_job(job_dict)
+                        job_dict["job_score"] = float(job_report.total)
+                        job_dict["job_score_report"] = job_report.as_dict()
+                    except Exception:
+                        pass
+                    doc["jobs"][str(i)] = job_dict
 
                 _toml_dump_file(filepath, doc)
                 logger.info("Saved %d jobs to %s", len(jobs), filepath)

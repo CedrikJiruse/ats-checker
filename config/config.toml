@@ -9,10 +9,10 @@
 # - Multi-agent settings live under [ai.agents.*].
 
 [paths]
-output_folder = "output"
-input_resumes_folder = "input_resumes"
-job_descriptions_folder = "job_descriptions"
-job_search_results_folder = "job_search_results"
+output_folder = "workspace/output"
+input_resumes_folder = "workspace/input_resumes"
+job_descriptions_folder = "workspace/job_descriptions"
+job_search_results_folder = "workspace/job_search_results"
 
 # State and saved searches (TOML)
 state_file = "data/processed_resumes_state.toml"
@@ -70,11 +70,44 @@ target_score = 80.0
 max_iterations = 3
 min_score_delta = 0.1
 
+# Iteration strategy (advanced)
+# - "best_of": keep best candidate seen so far; stop on target/no_progress/max_iterations
+# - "first_hit": stop immediately once target_score is reached
+# - "patience": stop if no improvement is seen for N iterations (best overall for stability)
+iteration_strategy = "patience"
+iteration_patience = 2
+stop_on_regression = true
+max_regressions = 2
+
 # Structured output format for enhanced resume data:
 # - "json": JSON only
 # - "toml": TOML preferred (fallback to JSON if TOML write fails)
 # - "both": write both TOML and JSON
 structured_output_format = "toml"
+
+# Schema validation (optional)
+# If enabled, the app may validate the AI-produced structured resume output and retry once
+# (depending on processing.schema_validation_max_retries).
+schema_validation_enabled = false
+resume_schema_path = "config/resume_schema.json"
+schema_validation_max_retries = 1
+
+# Recommendations (optional)
+# If enabled, the app may generate actionable recommendations from score breakdowns
+# and attach them into the structured output under `_scoring.recommendations`.
+recommendations_enabled = false
+recommendations_max_items = 5
+
+# Output layout
+# Controls how outputs are organized under `paths.output_folder`.
+# Available placeholders:
+# - {resume_name}  (filename without extension)
+# - {job_title}    (job description filename without extension, or "generic")
+# - {timestamp}    (YYYYMMDD_HHMMSS)
+output_subdir_pattern = "{resume_name}/{job_title}/{timestamp}"
+
+# If true, write a separate score summary file alongside outputs.
+write_score_summary_file = true
 
 
 [job_search]

@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/ats-checker/schemas/resume_schema.json",
+  "title": "ATS Checker Structured Resume",
+  "type": "object",
+  "description": "Schema for the structured resume JSON produced by ATS Checker. Supports optional _meta and _scoring extensions.",
+  "additionalProperties": false,
+  "properties": {
+    "personal_info": {
+      "type": "object",
+      "description": "Personal/contact section.",
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "linkedin": { "type": "string" },
+        "github": { "type": "string" },
+        "portfolio": { "type": "string" },
+        "headline": { "type": "string" },
+        "location": { "type": "string" }
+      }
+    },
+    "summary": {
+      "type": ["string", "null"],
+      "description": "Professional summary."
+    },
+    "experience": {
+      "type": ["array", "null"],
+      "description": "Work experience entries.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "title": { "type": "string" },
+          "company": { "type": "string" },
+          "location": { "type": "string" },
+          "start_date": { "type": "string" },
+          "end_date": { "type": "string" },
+          "description": {
+            "description": "Bulleted accomplishments/notes. Prefer an array of strings.",
+            "oneOf": [
+              {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              { "type": "string" },
+              { "type": "null" }
+            ]
+          }
+        }
+      }
+    },
+    "education": {
+      "type": ["array", "null"],
+      "description": "Education entries.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "degree": { "type": "string" },
+          "institution": { "type": "string" },
+          "location": { "type": "string" },
+          "graduation_date": { "type": "string" },
+          "gpa": { "type": "string" }
+        }
+      }
+    },
+    "skills": {
+      "type": ["array", "null"],
+      "description": "List of skills/keywords.",
+      "items": { "type": "string" }
+    },
+    "projects": {
+      "type": ["array", "null"],
+      "description": "Project entries.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "link": { "type": "string" }
+        }
+      }
+    },
+
+    "_meta": {
+      "type": "object",
+      "description": "Optional metadata added by the pipeline (file paths, timestamps, lineage, etc.).",
+      "additionalProperties": true,
+      "properties": {
+        "source_resume_path": { "type": "string" },
+        "job_description_file": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "version": { "type": ["integer", "string"] },
+        "iteration_history": { "type": "array" }
+      }
+    },
+
+    "_scoring": {
+      "type": "object",
+      "description": "Optional scoring extension added by the pipeline. Category structure is intentionally permissive to allow evolution.",
+      "additionalProperties": true,
+      "properties": {
+        "iteration_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["resume_only", "resume_plus_match"]
+        },
+        "resume_report": { "$ref": "#/$defs/scoreReport" },
+        "match_report": { "$ref": "#/$defs/scoreReport" },
+        "job_report": { "$ref": "#/$defs/scoreReport" },
+        "combined": {
+          "type": "object",
+          "description": "Details about combining component reports into an iteration score.",
+          "additionalProperties": true,
+          "properties": {
+            "resume_total": { "type": "number" },
+            "match_total": { "type": "number" },
+            "weights": {
+              "type": "object",
+              "additionalProperties": { "type": "number" }
+            },
+            "raw_weights": {
+              "type": "object",
+              "additionalProperties": { "type": "number" }
+            },
+            "fallback": { "type": ["string", "null"] }
+          }
+        },
+        "recommendations": {
+          "type": "array",
+          "description": "Optional actionable recommendations derived from score breakdowns.",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  },
+  "required": ["personal_info", "experience", "education", "skills", "projects"],
+
+  "$defs": {
+    "scoreCategory": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "score": { "type": "number" },
+        "weight": { "type": "number" },
+        "details": { "type": "object" }
+      },
+      "required": ["name", "score"]
+    },
+    "scoreReport": {
+      "type": "object",
+      "description": "Generic scoring report structure.",
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": "string" },
+        "total": { "type": "number" },
+        "categories": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/scoreCategory" }
+        },
+        "meta": { "type": "object" }
+      },
+      "required": ["total"]
+    }
+  }
+}

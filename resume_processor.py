@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from gemini_integrator import GeminiAPIIntegrator
 from input_handler import InputHandler
 from output_generator import OutputGenerator
+from recommendations import generate_recommendations
+from schema_validation import load_schema, validate_json_str
 from scoring import compute_iteration_score, score_match, score_resume
 from state_manager import StateManager
 
@@ -53,7 +55,20 @@ class ResumeProcessor:
         target_score: float = 80.0,
         max_iterations: int = 3,
         min_score_delta: float = 0.1,
+        # Iteration strategy controls (advanced)
+        iteration_strategy: str = "best_of",
+        iteration_patience: int = 2,
+        stop_on_regression: bool = True,
+        max_regressions: int = 2,
         state_filepath: Optional[str] = None,
+        # New: schema validation / recommendations / output layout
+        schema_validation_enabled: bool = False,
+        resume_schema_path: str = "",
+        schema_validation_max_retries: int = 1,
+        recommendations_enabled: bool = False,
+        recommendations_max_items: int = 5,
+        output_subdir_pattern: str = "{resume_name}/{job_title}/{timestamp}",
+        write_score_summary_file: bool = True,
     ):
         self.state_manager = StateManager(
             state_filepath or "data/processed_resumes_state.toml"
@@ -76,6 +91,7 @@ class ResumeProcessor:
         self.output_generator = OutputGenerator(
             output_folder=output_folder,
             structured_output_format=structured_output_format,
+            output_subdir_pattern=output_subdir_pattern,
         )
 
         self.input_folder = input_folder
@@ -89,6 +105,31 @@ class ResumeProcessor:
         self.target_score = float(target_score)
         self.max_iterations = int(max_iterations)
         self.min_score_delta = float(min_score_delta)
+
+        self.iteration_strategy = (iteration_strategy or "best_of").strip().lower()
+        self.iteration_patience = max(0, int(iteration_patience))
+        self.stop_on_regression = bool(stop_on_regression)
+        self.max_regressions = max(0, int(max_regressions))
+
+        # Schema validation / recommendations / output layout config
+        self.schema_validation_enabled = bool(schema_validation_enabled)
+        self.resume_schema_path = resume_schema_path or ""
+        self.schema_validation_max_retries = int(schema_validation_max_retries)
+        self.recommendations_enabled = bool(recommendations_enabled)
+        self.recommendations_max_items = int(recommendations_max_items)
+        self.write_score_summary_file = bool(write_score_summary_file)
+
+        self._resume_schema: Optional[Dict[str, Any]] = None
+        if self.schema_validation_enabled and self.resume_schema_path:
+            try:
+                self._resume_schema = load_schema(self.resume_schema_path)
+            except Exception as e:
+                logger.warning(
+                    "Schema validation enabled but failed to load schema at '%s': %s",
+                    self.resume_schema_path,
+                    e,
+                )
+                self._resume_schema = None
 
         logger.info(
             "ResumeProcessor initialized. input_folder=%s output_folder=%s versions=%s iterate=%s target=%s max_iter=%s",
@@ -177,6 +218,47 @@ class ResumeProcessor:
                         version_idx,
                     )
 
+                    # Optional schema validation (best-effort). If enabled and a schema is loaded,
+                    # validate and retry a limited number of times by asking the model to fix the schema.
+                    if (
+                        self.schema_validation_enabled
+                        and self._resume_schema is not None
+                    ):
+                        attempts = 0
+                        while True:
+                            result = validate_json_str(
+                                enhanced_resume_json,
+                                self._resume_schema,
+                                instance_name="enhanced_resume",
+                                max_errors=20,
+                            )
+                            if result.ok:
+                                break
+
+                            attempts += 1
+                            if attempts > max(0, self.schema_validation_max_retries):
+                                raise ValueError(
+                                    "Enhanced resume failed schema validation:\n"
+                                    + (result.detail or "\n".join(result.errors))
+                                )
+
+                            logger.warning(
+                                "Schema validation failed (attempt %d/%d). Asking model to correct schema. Summary=%s",
+                                attempts,
+                                self.schema_validation_max_retries,
+                                result.summary,
+                            )
+
+                            enhanced_resume_json = self.gemini_integrator.revise_resume(
+                                enhanced_resume_json=enhanced_resume_json,
+                                job_description=job_description_content,
+                                goals=[
+                                    "Fix the JSON schema to match the required structure exactly",
+                                    "Do not add markdown fences",
+                                    "Preserve all existing information; only restructure/normalize fields as needed",
+                                ],
+                            )
+
                     # Optional iterative improvement loop
                     if self.iterate_until_score_reached:
                         iter_result = self._iterate_until_target(
@@ -246,7 +328,7 @@ class ResumeProcessor:
                     try:
                         resume_obj = json.loads(enhanced_resume_json)
                         if isinstance(resume_obj, dict):
-                            resume_obj["_scoring"] = {
+                            scoring_blob: Dict[str, Any] = {
                                 "iteration_score": float(iteration_score),
                                 **(
                                     score_details
@@ -254,6 +336,21 @@ class ResumeProcessor:
                                     else {}
                                 ),
                             }
+
+                            # Optional heuristic recommendations (deterministic; no API calls)
+                            if self.recommendations_enabled:
+                                try:
+                                    recs = generate_recommendations(
+                                        scoring_payload=scoring_blob,
+                                        max_items=self.recommendations_max_items,
+                                    )
+                                    scoring_blob["recommendations"] = recs
+                                except Exception as e:
+                                    logger.warning(
+                                        "Failed to generate recommendations: %s", e
+                                    )
+
+                            resume_obj["_scoring"] = scoring_blob
                             enhanced_resume_json = json.dumps(
                                 resume_obj, ensure_ascii=False, indent=2
                             )
@@ -273,6 +370,38 @@ class ResumeProcessor:
                         filepath,
                         last_structured_path,
                     )
+
+                    # Optional: write a separate score summary file alongside outputs.
+                    if self.write_score_summary_file and last_structured_path:
+                        try:
+                            resume_obj = json.loads(enhanced_resume_json)
+                            scoring_blob = (
+                                resume_obj.get("_scoring")
+                                if isinstance(resume_obj, dict)
+                                else None
+                            )
+                            if isinstance(scoring_blob, dict):
+                                out_dir = os.path.dirname(last_structured_path)
+                                base = os.path.splitext(os.path.basename(filepath))[0]
+                                score_filename = (
+                                    f"{base}_{job_title_for_filename}_scores.json"
+                                )
+                                score_path = os.path.join(out_dir, score_filename)
+                                with open(score_path, "w", encoding="utf-8") as f:
+                                    json.dump(
+                                        scoring_blob, f, indent=2, ensure_ascii=False
+                                    )
+                                logger.info(
+                                    "Wrote score summary file for '%s' at: %s",
+                                    filepath,
+                                    score_path,
+                                )
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to write score summary file for '%s': %s",
+                                filepath,
+                                e,
+                            )
 
                     # Human-readable text output
                     text_output_path = self.output_generator.generate_text_output(
@@ -328,7 +457,16 @@ class ResumeProcessor:
                 details={"initial": best_details},
             )
 
+        # Iteration stop logic:
+        # - best_of: keep the best candidate seen so far (default)
+        # - first_hit: stop immediately when target_score is reached
+        # - patience: stop when no improvement has occurred for N iterations
+        # - optional: stop after too many regressions
         stopped_reason = "max_iterations"
+        no_improve_streak = 0
+        regression_count = 0
+        previous_score = best_score
+
         for i in range(1, self.max_iterations + 1):
             candidate_json = self.gemini_integrator.revise_resume(
                 enhanced_resume_json=best_json,
@@ -349,29 +487,59 @@ class ResumeProcessor:
                 {"iteration": i, "score": candidate_score, "details": candidate_details}
             )
 
-            delta = candidate_score - best_score
-            improved = candidate_score > best_score
+            # Regression tracking (relative to previous iteration score)
+            if candidate_score < previous_score:
+                regression_count += 1
+            previous_score = candidate_score
 
-            if improved:
+            # Only treat as an improvement if it clears min_score_delta vs the current best
+            improvement_amount = candidate_score - best_score
+            improved_enough = improvement_amount >= self.min_score_delta
+
+            if improved_enough:
                 best_json = candidate_json
                 best_score = candidate_score
                 best_details = candidate_details
+                no_improve_streak = 0
+            else:
+                no_improve_streak += 1
 
+            # Stop conditions
             if best_score >= self.target_score:
                 stopped_reason = "target_reached"
+                if self.iteration_strategy == "first_hit":
+                    break
+                # For other strategies, once target is reached we can stop as well.
                 break
 
-            # Stop if we don't improve enough (prevents long flapping)
-            if delta < self.min_score_delta:
-                stopped_reason = "no_progress"
+            if self.stop_on_regression and regression_count >= self.max_regressions:
+                stopped_reason = "regression"
                 break
+
+            if self.iteration_strategy == "patience" and self.iteration_patience > 0:
+                if no_improve_streak >= self.iteration_patience:
+                    stopped_reason = "no_progress"
+                    break
+            else:
+                # Default behavior: stop on first insufficient improvement
+                if improvement_amount < self.min_score_delta:
+                    stopped_reason = "no_progress"
+                    break
 
         return IterationResult(
             best_resume_json=best_json,
             best_score=best_score,
             history=history,
             stopped_reason=stopped_reason,
-            details={"best": best_details},
+            details={
+                "best": best_details,
+                "iteration_strategy": self.iteration_strategy,
+                "iteration_patience": self.iteration_patience,
+                "stop_on_regression": self.stop_on_regression,
+                "max_regressions": self.max_regressions,
+                "regression_count": regression_count,
+                "no_improve_streak": no_improve_streak,
+            },
         )
 
     def _score_for_iteration(

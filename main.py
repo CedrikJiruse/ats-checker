@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+import sys
 import warnings
 
 # Suppress NumPy MINGW-W64 warnings on Windows
@@ -9,7 +10,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy")
 
 from config import Config, load_config
 from input_handler import InputHandler  # Import InputHandler
-from job_scraper_base import SearchFilters
+from job_scraper_base import JobPosting, SearchFilters
 from job_scraper_manager import JobScraperManager
 from resume_processor import ResumeProcessor
 from scoring import compute_iteration_score, score_match, score_resume
@@ -354,7 +355,18 @@ def process_all_resumes(config):
             target_score=config.target_score,
             max_iterations=config.max_iterations,
             min_score_delta=config.min_score_delta,
+            iteration_strategy=config.iteration_strategy,
+            iteration_patience=config.iteration_patience,
+            stop_on_regression=config.stop_on_regression,
+            max_regressions=config.max_regressions,
             state_filepath=config.state_file,
+            schema_validation_enabled=config.schema_validation_enabled,
+            resume_schema_path=config.resume_schema_path,
+            schema_validation_max_retries=config.schema_validation_max_retries,
+            recommendations_enabled=config.recommendations_enabled,
+            recommendations_max_items=config.recommendations_max_items,
+            output_subdir_pattern=config.output_subdir_pattern,
+            write_score_summary_file=config.write_score_summary_file,
         )
         processor.process_resumes()
         logging.info("Resume processing completed successfully.")
@@ -411,7 +423,18 @@ def process_resumes_with_job_description(config):
             target_score=config.target_score,
             max_iterations=config.max_iterations,
             min_score_delta=config.min_score_delta,
+            iteration_strategy=config.iteration_strategy,
+            iteration_patience=config.iteration_patience,
+            stop_on_regression=config.stop_on_regression,
+            max_regressions=config.max_regressions,
             state_filepath=config.state_file,
+            schema_validation_enabled=config.schema_validation_enabled,
+            resume_schema_path=config.resume_schema_path,
+            schema_validation_max_retries=config.schema_validation_max_retries,
+            recommendations_enabled=config.recommendations_enabled,
+            recommendations_max_items=config.recommendations_max_items,
+            output_subdir_pattern=config.output_subdir_pattern,
+            write_score_summary_file=config.write_score_summary_file,
         )
         processor.process_resumes(job_description_name=selected_jd)
         logging.info("Resume processing completed successfully.")
@@ -525,7 +548,18 @@ def process_specific_resume_with_job(config):
             target_score=config.target_score,
             max_iterations=config.max_iterations,
             min_score_delta=config.min_score_delta,
+            iteration_strategy=config.iteration_strategy,
+            iteration_patience=config.iteration_patience,
+            stop_on_regression=config.stop_on_regression,
+            max_regressions=config.max_regressions,
             state_filepath=config.state_file,
+            schema_validation_enabled=config.schema_validation_enabled,
+            resume_schema_path=config.resume_schema_path,
+            schema_validation_max_retries=config.schema_validation_max_retries,
+            recommendations_enabled=config.recommendations_enabled,
+            recommendations_max_items=config.recommendations_max_items,
+            output_subdir_pattern=config.output_subdir_pattern,
+            write_score_summary_file=config.write_score_summary_file,
         )
 
         # Process just this one resume
@@ -1225,16 +1259,45 @@ def view_saved_job_results(config, job_scraper_manager):
             print(f"\n--- {filename} ---")
             print(f"Total jobs: {len(jobs)}")
 
-            display_count = min(10, len(jobs))
-            print(f"\nShowing first {display_count} jobs:")
-            for i, job in enumerate(jobs[:display_count], 1):
-                print(f"\n{i}. {job.title}")
-                print(f"   Company: {job.company}")
-                print(f"   Location: {job.location}")
-                print(f"   Source: {job.source}")
-                print(f"   URL: {job.url}")
-                if job.salary:
-                    print(f"   Salary: {job.salary}")
+            # Prefer displaying top-scored jobs if scores are available in the result file.
+            results_path = os.path.join(config.job_search_results_folder, filename)
+            ranked = job_scraper_manager.rank_jobs_in_results(results_path, top_n=10)
+
+            if ranked:
+                print(f"\nTop {len(ranked)} jobs by score:")
+                for entry in ranked:
+                    job_data = entry.get("job", {}) if isinstance(entry, dict) else {}
+                    score = entry.get("job_score")
+                    title = job_data.get("title", "")
+                    company = job_data.get("company", "")
+                    location = job_data.get("location", "")
+                    url = job_data.get("url", "")
+                    salary = job_data.get("salary", None)
+
+                    print(f"\n{entry.get('rank', '?')}. {title}")
+                    if isinstance(score, (int, float)):
+                        print(f"   Score: {float(score):.2f}")
+                    else:
+                        print("   Score: N/A")
+                    if company:
+                        print(f"   Company: {company}")
+                    if location:
+                        print(f"   Location: {location}")
+                    if url:
+                        print(f"   URL: {url}")
+                    if salary:
+                        print(f"   Salary: {salary}")
+            else:
+                display_count = min(10, len(jobs))
+                print(f"\nShowing first {display_count} jobs:")
+                for i, job in enumerate(jobs[:display_count], 1):
+                    print(f"\n{i}. {job.title}")
+                    print(f"   Company: {job.company}")
+                    print(f"   Location: {job.location}")
+                    print(f"   Source: {job.source}")
+                    print(f"   URL: {job.url}")
+                    if job.salary:
+                        print(f"   Salary: {job.salary}")
         except Exception as e:
             print(f"Error loading results: {e}")
     else:
@@ -1269,19 +1332,66 @@ def export_jobs_to_descriptions(config, job_scraper_manager):
             jobs = job_scraper_manager.load_saved_results(filename)
             print(f"\nLoaded {len(jobs)} jobs from {filename}")
 
-            # Ask how many to export
-            export_count = input(
-                f"How many jobs to export? (1-{len(jobs)} or 'all'): "
-            ).strip()
+            print("\nExport mode:")
+            print("1. Export first N jobs (original order)")
+            print("2. Export top-scored jobs")
+            export_mode = input("Choose export mode (1-2): ").strip()
 
-            if export_count.lower() == "all":
-                jobs_to_export = jobs
-            elif export_count.isdigit() and 1 <= int(export_count) <= len(jobs):
-                jobs_to_export = jobs[: int(export_count)]
-            else:
-                print("Invalid number.")
-                input("\nPress Enter to continue...")
-                return
+            if export_mode == "2":
+                results_path = os.path.join(config.job_search_results_folder, filename)
+                ranked = job_scraper_manager.rank_jobs_in_results(
+                    results_path, top_n=100000
+                )
+                if not ranked:
+                    print(
+                        "No scored jobs found in this results file. Falling back to original order."
+                    )
+                    export_mode = "1"
+                else:
+                    export_count = input(
+                        f"How many top-scored jobs to export? (1-{len(ranked)} or 'all'): "
+                    ).strip()
+
+                    if export_count.lower() == "all":
+                        ranked_to_export = ranked
+                    elif export_count.isdigit() and 1 <= int(export_count) <= len(
+                        ranked
+                    ):
+                        ranked_to_export = ranked[: int(export_count)]
+                    else:
+                        print("Invalid number.")
+                        input("\nPress Enter to continue...")
+                        return
+
+                    # Convert ranked raw dict jobs into JobPosting objects (ignore extra fields like job_score).
+                    allowed = set(JobPosting.__dataclass_fields__.keys())
+                    jobs_to_export = []
+                    for entry in ranked_to_export:
+                        job_data = (
+                            entry.get("job", {}) if isinstance(entry, dict) else {}
+                        )
+                        if not isinstance(job_data, dict):
+                            continue
+                        filtered = {k: v for k, v in job_data.items() if k in allowed}
+                        try:
+                            jobs_to_export.append(JobPosting(**filtered))
+                        except Exception:
+                            continue
+
+            if export_mode != "2":
+                # Ask how many to export (original order)
+                export_count = input(
+                    f"How many jobs to export? (1-{len(jobs)} or 'all'): "
+                ).strip()
+
+                if export_count.lower() == "all":
+                    jobs_to_export = jobs
+                elif export_count.isdigit() and 1 <= int(export_count) <= len(jobs):
+                    jobs_to_export = jobs[: int(export_count)]
+                else:
+                    print("Invalid number.")
+                    input("\nPress Enter to continue...")
+                    return
 
             # Export the jobs
             exported = job_scraper_manager.export_to_job_descriptions(
@@ -1334,6 +1444,18 @@ def main_menu(config, config_file_path):
 
 
 def main():
+    # Non-interactive CLI subcommands (skip the interactive menu).
+    # This is intentionally checked before argparse parsing, because these subcommands
+    # have their own argument structure.
+    if len(sys.argv) > 1 and sys.argv[1] in (
+        "score-resume",
+        "score-match",
+        "rank-jobs",
+    ):
+        from cli_commands import main as cli_main
+
+        raise SystemExit(cli_main(sys.argv[1:]))
+
     parser = argparse.ArgumentParser(description="ATS Checker")
     parser.add_argument(
         "--config_file",
@@ -1399,7 +1521,18 @@ def main():
                 target_score=config.target_score,
                 max_iterations=config.max_iterations,
                 min_score_delta=config.min_score_delta,
+                iteration_strategy=config.iteration_strategy,
+                iteration_patience=config.iteration_patience,
+                stop_on_regression=config.stop_on_regression,
+                max_regressions=config.max_regressions,
                 state_filepath=config.state_file,
+                schema_validation_enabled=config.schema_validation_enabled,
+                resume_schema_path=config.resume_schema_path,
+                schema_validation_max_retries=config.schema_validation_max_retries,
+                recommendations_enabled=config.recommendations_enabled,
+                recommendations_max_items=config.recommendations_max_items,
+                output_subdir_pattern=config.output_subdir_pattern,
+                write_score_summary_file=config.write_score_summary_file,
             )
             processor.process_resumes(job_description_name=job_description_to_use)
             logging.info("Resume processing completed successfully.")
