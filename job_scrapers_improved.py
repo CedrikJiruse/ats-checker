@@ -3,18 +3,34 @@ Improved job scrapers using JobSpy library for reliable scraping.
 """
 
 import logging
+import math
 from typing import List, Optional
 
 from job_scraper_base import BaseJobScraper, JobPosting, SearchFilters
 
 logger = logging.getLogger(__name__)
 
-# Try to import JobSpy library
-try:
-    JOBSPY_AVAILABLE = True
-except ImportError:
-    JOBSPY_AVAILABLE = False
-    logger.warning("JobSpy not available. Install with: pip install python-jobspy")
+# JobSpy is imported lazily to avoid importing heavy dependencies (like pandas/numpy)
+# during module import (e.g., during test collection).
+scrape_jobs = None  # will be set to callable when first needed
+JOBSPY_AVAILABLE = None  # unknown until an import attempt is made
+
+
+def _lazy_load_jobspy():
+    global scrape_jobs, JOBSPY_AVAILABLE
+    if scrape_jobs is not None:
+        return scrape_jobs
+
+    try:
+        from jobspy import scrape_jobs as _scrape_jobs
+
+        scrape_jobs = _scrape_jobs
+        JOBSPY_AVAILABLE = True
+        return scrape_jobs
+    except ImportError:
+        JOBSPY_AVAILABLE = False
+        logger.warning("JobSpy not available. Install with: pip install python-jobspy")
+        return None
 
 
 class JobSpyScraper(BaseJobScraper):
@@ -57,7 +73,8 @@ class JobSpyScraper(BaseJobScraper):
         Returns:
             List of JobPosting objects
         """
-        if not JOBSPY_AVAILABLE:
+        scrape_fn = _lazy_load_jobspy()
+        if scrape_fn is None:
             self.logger.error(
                 "JobSpy library not available. Install with: pip install python-jobspy"
             )
@@ -104,16 +121,21 @@ class JobSpyScraper(BaseJobScraper):
             self.logger.info(f"Searching {sites} for '{search_term}' in '{location}'")
 
             # Call JobSpy
-            df = scrape_jobs(
-                site_name=sites,
-                search_term=search_term,
-                location=location,
-                results_wanted=max_results,
-                hours_old=hours_old,
-                country_indeed="USA",  # Can be made configurable
-                is_remote=filters.remote_only if filters.remote_only else None,
-                job_type=job_type,
-            )
+            scrape_params = {
+                "site_name": sites,
+                "search_term": search_term,
+                "location": location,
+                "results_wanted": max_results,
+                "hours_old": hours_old,
+                "country_indeed": "USA",  # Can be made configurable
+                "job_type": job_type,
+            }
+
+            # Only add is_remote if explicitly set to True
+            if filters.remote_only:
+                scrape_params["is_remote"] = True
+
+            df = scrape_fn(**scrape_params)
 
             if df is not None and not df.empty:
                 # Convert DataFrame to JobPosting objects
@@ -149,27 +171,50 @@ class JobSpyScraper(BaseJobScraper):
         return jobs
 
     def _format_salary(self, row) -> Optional[str]:
-        """Format salary information from JobSpy data."""
+        """Format salary information from JobSpy data (no pandas dependency)."""
         try:
             min_amount = row.get("min_amount")
             max_amount = row.get("max_amount")
             interval = row.get("interval", "yearly")
             currency = row.get("currency", "USD")
 
-            if min_amount or max_amount:
+            def _is_nan(value) -> bool:
+                # Works for float('nan') and numpy.nan (if present) without importing numpy/pandas.
+                try:
+                    return value != value or (
+                        isinstance(value, float) and math.isnan(value)
+                    )
+                except Exception:
+                    return False
+
+            def _to_float(value) -> Optional[float]:
+                if value is None or _is_nan(value):
+                    return None
+                try:
+                    return float(value)
+                except Exception:
+                    return None
+
+            min_v = _to_float(min_amount)
+            max_v = _to_float(max_amount)
+
+            has_min = min_v is not None
+            has_max = max_v is not None
+
+            if has_min or has_max:
                 parts = []
                 if currency:
-                    parts.append(currency)
-                if min_amount and max_amount:
-                    parts.append(f"{min_amount:,.0f} - {max_amount:,.0f}")
-                elif min_amount:
-                    parts.append(f"{min_amount:,.0f}+")
-                elif max_amount:
-                    parts.append(f"Up to {max_amount:,.0f}")
+                    parts.append(str(currency))
+                if has_min and has_max:
+                    parts.append(f"{min_v:,.0f} - {max_v:,.0f}")
+                elif has_min:
+                    parts.append(f"{min_v:,.0f}+")
+                elif has_max:
+                    parts.append(f"Up to {max_v:,.0f}")
                 if interval:
                     parts.append(f"per {interval}")
                 return " ".join(parts)
-        except:
+        except Exception:
             pass
         return None
 
@@ -182,7 +227,7 @@ class JobSpyScraper(BaseJobScraper):
 
             # Fallback: check location string
             location = str(row.get("location", "")).lower()
-            if "remote" in location:
+            if "remote" in location or "work from home" in location:
                 return True
         except:
             pass
@@ -241,7 +286,7 @@ if __name__ == "__main__":
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
-    if not JOBSPY_AVAILABLE:
+    if _lazy_load_jobspy() is None:
         logger.error("JobSpy not installed. Install with: pip install python-jobspy")
         logger.info("This library is much more reliable than basic HTML scraping!")
     else:

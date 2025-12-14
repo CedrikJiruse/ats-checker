@@ -2,13 +2,19 @@ import argparse
 import json
 import logging
 import os
+import warnings
+
+# Suppress NumPy MINGW-W64 warnings on Windows
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy")
 
 from config import Config, load_config
 from input_handler import InputHandler  # Import InputHandler
 from job_scraper_base import SearchFilters
 from job_scraper_manager import JobScraperManager
 from resume_processor import ResumeProcessor
+from scoring import compute_iteration_score, score_match, score_resume
 from state_manager import StateManager  # Import StateManager
+from utils import calculate_file_hash
 
 # Configure logging
 logging.basicConfig(
@@ -322,7 +328,7 @@ def process_resumes_menu(config):
 def process_all_resumes(config):
     """Process all resumes without tailoring"""
     try:
-        state_manager = StateManager()
+        state_manager = StateManager(config.state_file)
         input_handler = InputHandler(
             state_manager, job_description_folder=config.job_descriptions_folder
         )
@@ -341,6 +347,14 @@ def process_all_resumes(config):
             num_versions_per_job=config.num_versions_per_job,
             job_description_folder=config.job_descriptions_folder,
             tesseract_cmd=config.tesseract_cmd,
+            ai_agents=config.ai_agents,
+            scoring_weights_file=config.scoring_weights_file,
+            structured_output_format=config.structured_output_format,
+            iterate_until_score_reached=config.iterate_until_score_reached,
+            target_score=config.target_score,
+            max_iterations=config.max_iterations,
+            min_score_delta=config.min_score_delta,
+            state_filepath=config.state_file,
         )
         processor.process_resumes()
         logging.info("Resume processing completed successfully.")
@@ -354,7 +368,7 @@ def process_resumes_with_job_description(config):
     """Process resumes tailored to a specific job description"""
     # Get available job descriptions
     try:
-        state_manager = StateManager()
+        state_manager = StateManager(config.state_file)
         input_handler = InputHandler(
             state_manager, job_description_folder=config.job_descriptions_folder
         )
@@ -390,6 +404,14 @@ def process_resumes_with_job_description(config):
             num_versions_per_job=config.num_versions_per_job,
             job_description_folder=config.job_descriptions_folder,
             tesseract_cmd=config.tesseract_cmd,
+            ai_agents=config.ai_agents,
+            scoring_weights_file=config.scoring_weights_file,
+            structured_output_format=config.structured_output_format,
+            iterate_until_score_reached=config.iterate_until_score_reached,
+            target_score=config.target_score,
+            max_iterations=config.max_iterations,
+            min_score_delta=config.min_score_delta,
+            state_filepath=config.state_file,
         )
         processor.process_resumes(job_description_name=selected_jd)
         logging.info("Resume processing completed successfully.")
@@ -433,8 +455,10 @@ def process_specific_resume_with_job(config):
         selected_resume = resume_files[int(choice) - 1]
         resume_path = os.path.join(config.input_resumes_folder, selected_resume)
 
+        # Create state manager (used for job description loading, OCR and processing state)
+        state_manager = StateManager(config.state_file)
+
         # Get available job descriptions
-        state_manager = StateManager()
         input_handler = InputHandler(
             state_manager, job_description_folder=config.job_descriptions_folder
         )
@@ -467,9 +491,20 @@ def process_specific_resume_with_job(config):
             f"Processing resume '{selected_resume}' tailored to: {selected_jd}"
         )
 
-        # Read the resume content
-        with open(resume_path, "r", encoding="utf-8") as f:
-            resume_content = f.read()
+        # Extract the resume content (supports text/markdown + OCR for images)
+        _, ext = os.path.splitext(resume_path)
+        ext = ext.lower()
+
+        if ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"):
+            ocr_handler = InputHandler(
+                state_manager, tesseract_cmd=config.tesseract_cmd
+            )
+            resume_content = ocr_handler.extract_text_from_image(resume_path)
+        else:
+            resume_content = extract_text_from_file(resume_path)
+
+        # Track processing state by content hash (TOML-backed StateManager)
+        file_hash = calculate_file_hash(resume_path)
 
         # Create a temporary processor for this single resume
         processor = ResumeProcessor(
@@ -483,6 +518,14 @@ def process_specific_resume_with_job(config):
             num_versions_per_job=config.num_versions_per_job,
             job_description_folder=config.job_descriptions_folder,
             tesseract_cmd=config.tesseract_cmd,
+            ai_agents=config.ai_agents,
+            scoring_weights_file=config.scoring_weights_file,
+            structured_output_format=config.structured_output_format,
+            iterate_until_score_reached=config.iterate_until_score_reached,
+            target_score=config.target_score,
+            max_iterations=config.max_iterations,
+            min_score_delta=config.min_score_delta,
+            state_filepath=config.state_file,
         )
 
         # Process just this one resume
@@ -504,12 +547,79 @@ def process_specific_resume_with_job(config):
                     f"Resume '{selected_resume}' enhanced by Gemini API (Version {i})."
                 )
 
+                enhanced_resume_json = enhanced_resume_data
+
+                # Optional iterative loop: revise until target score reached
+                if config.iterate_until_score_reached:
+
+                    def score_fn(resume_json_str: str) -> float:
+                        resume_obj = json.loads(resume_json_str)
+                        if not isinstance(resume_obj, dict):
+                            return 0.0
+
+                        resume_report = score_resume(
+                            resume_obj, weights_toml_path=config.scoring_weights_file
+                        )
+
+                        # If no JD content, optimize resume quality only
+                        if not job_description_content:
+                            return float(resume_report.total)
+
+                        job_obj = {
+                            "title": job_title_for_filename,
+                            "company": "",
+                            "location": "",
+                            "description": job_description_content,
+                            "url": "",
+                            "source": "job_description",
+                        }
+                        match_report = score_match(
+                            resume_obj,
+                            job_obj,
+                            weights_toml_path=config.scoring_weights_file,
+                        )
+                        combined, _details = compute_iteration_score(
+                            resume_report=resume_report,
+                            match_report=match_report,
+                            weights_toml_path=config.scoring_weights_file,
+                        )
+                        return float(combined)
+
+                    iter_result = (
+                        processor.gemini_integrator.revise_resume_until_score_reached(
+                            enhanced_resume_json=enhanced_resume_json,
+                            score_fn=score_fn,
+                            job_description=job_description_content,
+                            target_score=config.target_score,
+                            max_iterations=config.max_iterations,
+                            min_score_delta=config.min_score_delta,
+                        )
+                    )
+                    enhanced_resume_json = iter_result["best_resume_json"]
+                    logging.info(
+                        f"Iteration finished for '{selected_resume}' (Version {i}): best_score={iter_result['best_score']:.2f} stopped_reason={iter_result['stopped_reason']}"
+                    )
+
+                # Structured output (TOML preferred via OutputGenerator config)
+                structured_output_path = (
+                    processor.output_generator.generate_structured_output(
+                        enhanced_resume_json, selected_resume, job_title_for_filename
+                    )
+                )
+                logging.info(
+                    f"Generated structured output for '{selected_resume}' at: {structured_output_path}"
+                )
+
+                # Always generate TXT output as well
                 text_output_path = processor.output_generator.generate_text_output(
-                    enhanced_resume_data, selected_resume, job_title_for_filename
+                    enhanced_resume_json, selected_resume, job_title_for_filename
                 )
                 logging.info(
                     f"Generated TXT for '{selected_resume}' at: {text_output_path}"
                 )
+
+                # Update processing state to avoid re-processing unchanged resumes
+                state_manager.update_resume_state(file_hash, structured_output_path)
 
             logging.info("Resume processing completed successfully.")
         except Exception as e:
@@ -605,28 +715,21 @@ def edit_setting(config, config_file_path, setting_choice):
 
             setattr(config, key, new_value)
 
-            # Save normalized path to config file for folder paths, or the raw value for other settings
+            # Persist configuration to TOML (preferred).
+            # If the user provided a legacy .json config path, write a sibling .toml file instead.
             try:
-                with open(config_file_path, "r") as f:
-                    config_data = json.load(f)
-            except FileNotFoundError:
-                config_data = {}
+                from config import save_config_toml
 
-            # For folder paths, save the normalized absolute path
-            if key in [
-                "output_folder",
-                "input_resumes_folder",
-                "job_descriptions_folder",
-            ]:
-                config_data[key] = os.path.abspath(new_value)
-            else:
-                # For tesseract_cmd, save None as null in JSON
-                config_data[key] = new_value
+                toml_path = config_file_path
+                if toml_path.lower().endswith(".json"):
+                    toml_path = toml_path[:-5] + ".toml"
 
-            with open(config_file_path, "w") as f:
-                json.dump(config_data, f, indent=4)
-
-            print(f"Setting '{name}' updated successfully.")
+                save_config_toml(config, toml_path)
+                print(f"Setting '{name}' updated successfully.")
+                print(f"Configuration saved to: {toml_path}")
+            except Exception as e:
+                print(f"Setting '{name}' updated successfully.")
+                print(f"Warning: failed to save configuration to TOML: {e}")
         else:
             print("No changes made.")
     else:
@@ -683,7 +786,7 @@ def view_job_descriptions(config):
         print(f"Folder '{config.job_descriptions_folder}' does not exist.")
     else:
         try:
-            state_manager = StateManager()
+            state_manager = StateManager(config.state_file)
             input_handler = InputHandler(
                 state_manager, job_description_folder=config.job_descriptions_folder
             )
@@ -765,7 +868,7 @@ def test_ocr_functionality(config):
 
         try:
             # Use InputHandler to extract text from image
-            state_manager = StateManager()
+            state_manager = StateManager(config.state_file)
             input_handler = InputHandler(
                 state_manager, tesseract_cmd=config.tesseract_cmd
             )
@@ -1201,7 +1304,8 @@ def main_menu(config, config_file_path):
     """Main menu loop"""
     # Initialize job scraper manager
     job_scraper_manager = JobScraperManager(
-        results_folder=config.job_search_results_folder
+        results_folder=config.job_search_results_folder,
+        saved_searches_path=config.saved_searches_file,
     )
 
     while True:
@@ -1234,8 +1338,8 @@ def main():
     parser.add_argument(
         "--config_file",
         type=str,
-        default="config.json",
-        help="Path to the configuration JSON file.",
+        default="config/config.toml",
+        help="Path to the configuration TOML file.",
     )
     parser.add_argument(
         "--job_description",
@@ -1252,7 +1356,9 @@ def main():
     if args.job_description:
         # Run in CLI mode for backward compatibility
         try:
-            state_manager = StateManager()  # Initialize StateManager here
+            state_manager = StateManager(
+                config.state_file
+            )  # Initialize StateManager here
             input_handler = InputHandler(
                 state_manager, job_description_folder=config.job_descriptions_folder
             )
@@ -1284,8 +1390,16 @@ def main():
                 top_k=config.top_k,
                 max_output_tokens=config.max_output_tokens,
                 num_versions_per_job=config.num_versions_per_job,
-                job_description_folder=config.job_descriptions_folder,  # Pass job_description_folder
+                job_description_folder=config.job_descriptions_folder,
                 tesseract_cmd=config.tesseract_cmd,
+                ai_agents=config.ai_agents,
+                scoring_weights_file=config.scoring_weights_file,
+                structured_output_format=config.structured_output_format,
+                iterate_until_score_reached=config.iterate_until_score_reached,
+                target_score=config.target_score,
+                max_iterations=config.max_iterations,
+                min_score_delta=config.min_score_delta,
+                state_filepath=config.state_file,
             )
             processor.process_resumes(job_description_name=job_description_to_use)
             logging.info("Resume processing completed successfully.")

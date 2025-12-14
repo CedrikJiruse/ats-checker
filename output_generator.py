@@ -1,17 +1,72 @@
-import os
-import logging
 import json
-from typing import Dict, Any
+import logging
+import os
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+try:
+    import toml_io  # project-local TOML writer (dependency-free)
+except Exception:
+    toml_io = None
+
+
+def _sanitize_for_toml(value: Any) -> Any:
+    """
+    TOML does not support null/None. This helper recursively removes None values from
+    dicts/lists before writing TOML.
+    - dict: drops keys where value is None (after sanitization)
+    - list: drops None items (after sanitization)
+    - other scalars: returned as-is
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for k, v in value.items():
+            # TOML keys must be strings in our writer; skip non-string keys
+            if not isinstance(k, str):
+                continue
+            sv = _sanitize_for_toml(v)
+            if sv is None:
+                continue
+            out[k] = sv
+        return out
+
+    if isinstance(value, list):
+        out_list: List[Any] = []
+        for item in value:
+            sv = _sanitize_for_toml(item)
+            if sv is None:
+                continue
+            out_list.append(sv)
+        return out_list
+
+    return value
+
+
 class OutputGenerator:
-    def __init__(self, output_folder: str = "output"):
+    def __init__(
+        self, output_folder: str = "output", structured_output_format: str = "json"
+    ):
+        """
+        Args:
+            output_folder: Where to write output files.
+            structured_output_format: "json" (default), "toml", or "both".
+                - "toml": write TOML first, fallback to JSON if TOML writing fails
+                - "both": write both TOML and JSON (returns TOML path)
+        """
         self.output_folder = os.path.abspath(output_folder)
         os.makedirs(self.output_folder, exist_ok=True)
-        logger.info(f"OutputGenerator initialized with output folder: {self.output_folder}")
+        self.structured_output_format = (structured_output_format or "json").lower()
+        logger.info(
+            f"OutputGenerator initialized with output folder: {self.output_folder}"
+        )
 
-    def generate_text_output(self, resume_data_str: str, resume_filename: str, job_title: str) -> str:
+    def generate_text_output(
+        self, resume_data_str: str, resume_filename: str, job_title: str
+    ) -> str:
         """
         Generates a text file from a JSON string of structured resume data.
 
@@ -37,7 +92,7 @@ class OutputGenerator:
         base_name = os.path.splitext(os.path.basename(resume_filename))
         output_filename = f"{base_name[0]}_{job_title}_enhanced.txt"
         filepath = os.path.join(self.output_folder, output_filename)
-        
+
         try:
             with open(filepath, "w", encoding="utf-8") as f:
                 # Personal Information
@@ -131,16 +186,83 @@ class OutputGenerator:
                         f.write("\n")
                 f.write("\n")
 
+                # Scores (optional)
+                scoring = resume_data.get("_scoring") or resume_data.get("scoring")
+                if isinstance(scoring, dict):
+                    f.write("Scores:\n")
+
+                    overall = (
+                        scoring.get("iteration_score")
+                        or scoring.get("overall")
+                        or scoring.get("total")
+                    )
+                    if overall is not None:
+                        f.write(f"  Overall: {overall}\n")
+
+                    # Support both:
+                    # - scoring.resume / scoring.match / scoring.job
+                    # - scoring.resume_report / scoring.match_report / scoring.job_report
+                    key_candidates = {
+                        "resume": ["resume", "resume_report"],
+                        "match": ["match", "match_report"],
+                        "job": ["job", "job_report"],
+                    }
+
+                    for key, label in [
+                        ("resume", "Resume"),
+                        ("match", "Match"),
+                        ("job", "Job"),
+                    ]:
+                        rep = None
+                        for candidate_key in key_candidates.get(key, [key]):
+                            candidate = scoring.get(candidate_key)
+                            if isinstance(candidate, dict):
+                                rep = candidate
+                                break
+
+                        if not isinstance(rep, dict):
+                            continue
+
+                        total = (
+                            rep.get("total")
+                            if rep.get("total") is not None
+                            else rep.get("score")
+                        )
+                        if total is not None:
+                            f.write(f"  {label}: {total}\n")
+
+                        cats = rep.get("categories")
+                        if isinstance(cats, list):
+                            for c in cats:
+                                if not isinstance(c, dict):
+                                    continue
+                                n = c.get("name")
+                                s = c.get("score")
+                                w = c.get("weight")
+                                if n is None or s is None:
+                                    continue
+                                if w is not None:
+                                    f.write(f"    - {n}: {s} (weight {w})\n")
+                                else:
+                                    f.write(f"    - {n}: {s}\n")
+
+                    f.write("\n")
+
             logger.info(f"Successfully generated text file: {filepath}")
             return filepath
         except IOError as e:
             logger.error(f"Error writing text file {filepath}: {e}")
             raise
         except Exception as e:
-            logger.error(f"An unexpected error occurred during text generation for {output_filename}: {e}", exc_info=True)
+            logger.error(
+                f"An unexpected error occurred during text generation for {output_filename}: {e}",
+                exc_info=True,
+            )
             raise
 
-    def generate_json_output(self, resume_data_str: str, resume_filename: str, job_title: str) -> str:
+    def generate_json_output(
+        self, resume_data_str: str, resume_filename: str, job_title: str
+    ) -> str:
         """
         Generates a JSON file from a JSON string of structured resume data.
 
@@ -166,22 +288,126 @@ class OutputGenerator:
         base_name = os.path.splitext(os.path.basename(resume_filename))
         output_filename = f"{base_name[0]}_{job_title}_enhanced.json"
         filepath = os.path.join(self.output_folder, output_filename)
-        
+
         try:
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(resume_data, f, indent=2, ensure_ascii=False)
-            
+
             logger.info(f"Successfully generated JSON file: {filepath}")
             return filepath
         except IOError as e:
             logger.error(f"Error writing JSON file {filepath}: {e}")
             raise
         except Exception as e:
-            logger.error(f"An unexpected error occurred during JSON generation for {output_filename}: {e}", exc_info=True)
+            logger.error(
+                f"An unexpected error occurred during JSON generation for {output_filename}: {e}",
+                exc_info=True,
+            )
             raise
 
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    def generate_toml_output(
+        self, resume_data_str: str, resume_filename: str, job_title: str
+    ) -> str:
+        """
+        Generates a TOML file from a JSON string of structured resume data.
+
+        Args:
+            resume_data_str: A JSON string containing the structured resume information.
+            resume_filename: The original filename of the resume (e.g., "my_resume.txt").
+            job_title: The title of the job the resume is tailored for (e.g., "Software_Engineer").
+
+        Returns:
+            The full path to the generated TOML file.
+
+        Raises:
+            IOError: If there's an error writing the TOML file.
+            json.JSONDecodeError: If resume_data_str is not a valid JSON string.
+            RuntimeError: If TOML writing support isn't available.
+        """
+        try:
+            resume_data = json.loads(resume_data_str)
+        except json.JSONDecodeError as e:
+            logger.error(f"Error decoding resume data string for TOML generation: {e}")
+            raise
+
+        base_name = os.path.splitext(os.path.basename(resume_filename))
+        output_filename = f"{base_name[0]}_{job_title}_enhanced.toml"
+        filepath = os.path.join(self.output_folder, output_filename)
+
+        if toml_io is None:
+            raise RuntimeError(
+                "TOML output requested but TOML writer is unavailable (toml_io import failed)."
+            )
+
+        try:
+            sanitized_resume_data = _sanitize_for_toml(resume_data)
+            # In case the entire document becomes empty (rare), write an empty table instead of failing.
+            if sanitized_resume_data is None:
+                sanitized_resume_data = {}
+            toml_io.dump(sanitized_resume_data, filepath)
+            logger.info(f"Successfully generated TOML file: {filepath}")
+            return filepath
+        except IOError as e:
+            logger.error(f"Error writing TOML file {filepath}: {e}")
+            raise
+        except Exception as e:
+            logger.error(
+                f"An unexpected error occurred during TOML generation for {output_filename}: {e}",
+                exc_info=True,
+            )
+            raise
+
+    def generate_structured_output(
+        self, resume_data_str: str, resume_filename: str, job_title: str
+    ) -> str:
+        """
+        Generate structured output based on `self.structured_output_format`.
+
+        - "json": JSON only (backward compatible)
+        - "toml": TOML first, fallback to JSON
+        - "both": write both TOML and JSON (returns TOML path)
+
+        Returns:
+            Path to the primary structured output.
+        """
+        fmt = (self.structured_output_format or "json").lower()
+
+        if fmt == "json":
+            return self.generate_json_output(
+                resume_data_str, resume_filename, job_title
+            )
+
+        if fmt == "toml":
+            try:
+                return self.generate_toml_output(
+                    resume_data_str, resume_filename, job_title
+                )
+            except Exception as e:
+                logger.warning(f"TOML generation failed, falling back to JSON: {e}")
+                return self.generate_json_output(
+                    resume_data_str, resume_filename, job_title
+                )
+
+        if fmt == "both":
+            toml_path = self.generate_toml_output(
+                resume_data_str, resume_filename, job_title
+            )
+            # Always attempt JSON as well; if it fails, TOML is still returned.
+            try:
+                self.generate_json_output(resume_data_str, resume_filename, job_title)
+            except Exception as e:
+                logger.warning(f"JSON generation failed after TOML succeeded: {e}")
+            return toml_path
+
+        # Unknown format -> default to JSON
+        logger.warning(f"Unknown structured_output_format '{fmt}', defaulting to JSON")
+        return self.generate_json_output(resume_data_str, resume_filename, job_title)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
     # Example usage:
     output_gen = OutputGenerator()
 
@@ -251,7 +477,9 @@ if __name__ == '__main__':
         ]
     }
     """
-    output_txt_path = output_gen.generate_text_output(sample_resume_data_str, "Alice_Wonderland_Resume.txt", "Software_Engineer")
+    output_txt_path = output_gen.generate_text_output(
+        sample_resume_data_str, "Alice_Wonderland_Resume.txt", "Software_Engineer"
+    )
     logger.info(f"Generated TXT: {output_txt_path}")
 
     # Clean up test output folder

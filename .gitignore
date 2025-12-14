@@ -1,4 +1,10 @@
 output/
 input_resumes/
 job_descriptions/
+job_search_results/
+venv/
 __pycache__/
+.vscode/
+.pytest_cache/
+WARP.md
+data/processed_resumes_state.toml

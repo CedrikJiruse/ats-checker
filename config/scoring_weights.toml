@@ -1,0 +1,42 @@
+# ATS Checker Scoring Weights
+#
+# This file is consumed by `scoring.py` and MUST match its expected schema.
+#
+# Expected tables:
+#   [resume.weights]  -> categories used by score_resume()
+#   [job.weights]     -> categories used by score_job()
+#   [match.weights]   -> categories used by score_match()
+#
+# Notes:
+# - Weights are normalized per group (resume/job/match) so they do not need to sum to 1.
+# - All category scores are expected to be in the range 0..100.
+# - Unknown keys are ignored by the scorer.
+#
+# Overall weights for combining component scores into a single "iteration score".
+# These weights are intended for the iterative resume improvement loop.
+# (They are not currently consumed directly by `scoring.py`.)
+
+[overall.weights]
+# How much the resume's standalone quality vs the resume↔job match contributes.
+resume = 0.45
+match = 0.55
+
+[resume.weights]
+# Resume quality as a standalone document
+completeness = 0.30
+skills_quality = 0.20
+experience_quality = 0.30
+impact = 0.20
+
+[job.weights]
+# Job posting quality (independent of a specific resume)
+completeness = 0.35
+clarity = 0.35
+compensation_transparency = 0.15
+link_quality = 0.15
+
+[match.weights]
+# Resume ↔ Job alignment
+keyword_overlap = 0.45
+skills_overlap = 0.35
+role_alignment = 0.20

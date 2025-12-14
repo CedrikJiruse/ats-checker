@@ -5,29 +5,33 @@ from utils import calculate_file_hash
 from state_manager import StateManager
 import json
 
-# OCR imports
-try:
-    import pytesseract
-    from PIL import Image
-    OCR_AVAILABLE = True
-except ImportError:
-    OCR_AVAILABLE = False
-    logging.warning("OCR dependencies not available. Install pytesseract and Pillow for OCR functionality.")
+# OCR and PDF availability flags - imports are lazy-loaded when needed
+OCR_AVAILABLE = False
+PDF_AVAILABLE = False
 
-# PDF imports
+# Check if OCR dependencies are available without importing
 try:
-    import PyPDF2
-    PDF_AVAILABLE = True
-except ImportError:
-    PDF_AVAILABLE = False
-    logging.warning("PDF dependencies not available. Install PyPDF2 for PDF functionality.")
+    import importlib.util
+    if importlib.util.find_spec("pytesseract") and importlib.util.find_spec("PIL"):
+        OCR_AVAILABLE = True
+except Exception:
+    pass
+
+# Check if PDF dependencies are available without importing
+try:
+    import importlib.util
+    if importlib.util.find_spec("PyPDF2"):
+        PDF_AVAILABLE = True
+except Exception:
+    pass
 
 logger = logging.getLogger(__name__)
 
 class InputHandler:
-    def __init__(self, state_manager: StateManager, job_description_folder: Optional[str] = None):
+    def __init__(self, state_manager: StateManager, job_description_folder: Optional[str] = None, tesseract_cmd: Optional[str] = None):
         self.state_manager = state_manager
         self.job_description_folder = job_description_folder
+        self.tesseract_cmd = tesseract_cmd
 
     def extract_text_from_image(self, image_path: str) -> str:
         """
@@ -44,16 +48,41 @@ class InputHandler:
             return ""
         
         try:
+            # Lazy import of OCR dependencies
+            import pytesseract
+            from PIL import Image
+            
+            # Set Tesseract executable path if provided
+            if self.tesseract_cmd:
+                pytesseract.pytesseract.tesseract_cmd = self.tesseract_cmd
+            
+            # Check if Tesseract executable is properly configured
+            if hasattr(pytesseract, 'pytesseract') and hasattr(pytesseract.pytesseract, 'tesseract_cmd'):
+                logger.debug(f"Tesseract executable path: {pytesseract.pytesseract.tesseract_cmd}")
+            
             # Open the image file
             image = Image.open(image_path)
+            
+            # Log image details for debugging
+            logger.debug(f"Processing image: {image_path}")
+            logger.debug(f"Image size: {image.size}")
+            logger.debug(f"Image mode: {image.mode}")
             
             # Use pytesseract to extract text
             text = pytesseract.image_to_string(image)
             
             logger.info(f"Successfully extracted text from image: {image_path}")
+            logger.debug(f"Extracted text length: {len(text)}")
             return text
+        except FileNotFoundError as e:
+            logger.error(f"Tesseract executable not found. Please ensure Tesseract OCR is installed and added to your system PATH. Error: {e}")
+            return ""
         except Exception as e:
-            logger.error(f"Error extracting text from image {image_path}: {e}", exc_info=True)
+            # Handle pytesseract errors generically since we're lazy loading
+            if "TesseractNotFoundError" in str(type(e).__name__) or "TesseractError" in str(type(e).__name__):
+                logger.error(f"Tesseract error occurred while processing image {image_path}: {e}")
+            else:
+                logger.error(f"Unexpected error extracting text from image {image_path}: {e}", exc_info=True)
             return ""
 
     def extract_text_from_pdf(self, pdf_path: str) -> str:
@@ -71,6 +100,9 @@ class InputHandler:
             return ""
         
         try:
+            # Lazy import of PDF dependencies
+            import PyPDF2
+            
             with open(pdf_path, 'rb') as file:
                 reader = PyPDF2.PdfReader(file)
                 text = ""

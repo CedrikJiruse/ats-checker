@@ -1,0 +1,81 @@
+# ATS Checker configuration (TOML)
+#
+# This file replaces the legacy `config.json`.
+#
+# Notes:
+# - Most paths can be relative; the app will normalize them to absolute paths.
+# - `tesseract_cmd` is optional. Use "" (empty string) to mean "unset".
+# - Scoring weights are stored in a separate TOML file (see paths.scoring_weights_file).
+# - Multi-agent settings live under [ai.agents.*].
+
+[paths]
+output_folder = "output"
+input_resumes_folder = "input_resumes"
+job_descriptions_folder = "job_descriptions"
+job_search_results_folder = "job_search_results"
+
+# State and saved searches (TOML)
+state_file = "data/processed_resumes_state.toml"
+saved_searches_file = "data/saved_searches.toml"
+
+# OCR
+tesseract_cmd = ""
+
+# Scoring
+scoring_weights_file = "config/scoring_weights.toml"
+
+
+[ai]
+# Only "gemini" is supported right now.
+provider = "gemini"
+
+# Default model settings (used unless an agent overrides them)
+model_name = "gemini-1.5-flash-latest"
+temperature = 0.7
+top_p = 0.95
+top_k = 40
+max_output_tokens = 8192
+
+# Multi-agent configuration.
+# Each agent may override model_name/temperature/top_p/top_k/max_output_tokens.
+
+[ai.agents.enhancer]
+role = "resume_enhancement"
+provider = "gemini"
+model_name = "gemini-1.5-flash-latest"
+
+[ai.agents.job_summarizer]
+role = "job_summary"
+provider = "gemini"
+model_name = "gemini-1.5-flash-latest"
+
+[ai.agents.scorer]
+role = "scoring"
+provider = "gemini"
+model_name = "gemini-1.5-flash-latest"
+
+[ai.agents.reviser]
+role = "resume_revision"
+provider = "gemini"
+model_name = "gemini-1.5-flash-latest"
+
+
+[processing]
+# How many versions to generate per job description
+num_versions_per_job = 1
+
+# Iterative improvement loop (revise until target score reached)
+iterate_until_score_reached = false
+target_score = 80.0
+max_iterations = 3
+min_score_delta = 0.1
+
+# Structured output format for enhanced resume data:
+# - "json": JSON only
+# - "toml": TOML preferred (fallback to JSON if TOML write fails)
+# - "both": write both TOML and JSON
+structured_output_format = "toml"
+
+
+[job_search]
+max_job_results_per_search = 50

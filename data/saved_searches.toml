@@ -1,0 +1,8 @@
+# Saved searches (TOML)
+#
+# This file was converted from the legacy `saved_searches.json`.
+#
+# Notes:
+# - TOML has no `null`, so fields that were `null` in JSON are omitted here.
+# - Each saved search is stored under [searches.<id>] with a nested [searches.<id>.filters].
+
