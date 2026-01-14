@@ -384,32 +384,70 @@ class SavedSearchManager:
 class JobScraperManager:
     """Manages JobSpy-based job scrapers and coordinates searches."""
 
+    # Default portal mappings (portal_id -> (display_name, scraper_class))
+    PORTAL_SCRAPERS = {
+        "linkedin": ("LinkedIn", LinkedInJobSpyScraper),
+        "indeed": ("Indeed", IndeedJobSpyScraper),
+        "glassdoor": ("Glassdoor", GlassdoorJobSpyScraper),
+        "google": ("Google Jobs", GoogleJobSpyScraper),
+        "ziprecruiter": ("ZipRecruiter", ZipRecruiterJobSpyScraper),
+    }
+
     def __init__(
         self,
         results_folder: str = "job_search_results",
         saved_searches_path: str = "data/saved_searches.toml",
+        portals_config: Optional[Dict[str, Dict[str, Any]]] = None,
+        jobspy_config: Optional[Dict[str, Any]] = None,
+        search_defaults: Optional[Dict[str, Any]] = None,
     ):
         """
         Args:
             results_folder: Folder to store search results as TOML files.
             saved_searches_path: Path for saved searches TOML file.
+            portals_config: Dict of portal configs (enable/disable, display names).
+            jobspy_config: Global JobSpy settings (e.g., country_indeed).
+            search_defaults: Default filter values for job searches.
         """
         self.results_folder = results_folder
         os.makedirs(self.results_folder, exist_ok=True)
 
-        # Only JobSpy-based scrapers are supported.
-        self.scrapers: Dict[str, BaseJobScraper] = {
-            "LinkedIn": LinkedInJobSpyScraper(),
-            "Indeed": IndeedJobSpyScraper(),
-            "Glassdoor": GlassdoorJobSpyScraper(),
-            "Google": GoogleJobSpyScraper(),
-            "ZipRecruiter": ZipRecruiterJobSpyScraper(),
-        }
+        # Store configs for use in searches
+        self.search_defaults = search_defaults or {}
+        self.jobspy_config = jobspy_config or {}
+
+        # Build scrapers from config, filtering disabled portals
+        self.scrapers = self._build_scrapers(portals_config)
 
         self.saved_search_manager = SavedSearchManager(storage_path=saved_searches_path)
         logger.info(
             "JobScraperManager initialized with %d JobSpy scrapers", len(self.scrapers)
         )
+
+    def _build_scrapers(
+        self, portals_config: Optional[Dict[str, Dict[str, Any]]] = None
+    ) -> Dict[str, BaseJobScraper]:
+        """
+        Build scraper instances from portal configuration.
+
+        Args:
+            portals_config: Dict from config.job_search_portals
+
+        Returns:
+            Dict[display_name, scraper_instance]
+        """
+        scrapers: Dict[str, BaseJobScraper] = {}
+
+        for portal_id, (default_name, scraper_class) in self.PORTAL_SCRAPERS.items():
+            cfg = (portals_config or {}).get(portal_id, {"enabled": True})
+            if not cfg.get("enabled", True):
+                logger.debug("Portal %s is disabled, skipping", portal_id)
+                continue
+
+            display_name = cfg.get("display_name", default_name)
+            scrapers[display_name] = scraper_class()
+
+        return scrapers
 
     def get_available_sources(self) -> List[str]:
         return list(self.scrapers.keys())
@@ -427,7 +465,10 @@ class JobScraperManager:
             return []
 
         logger.info("Searching %s with filters: %s", source, filters.to_dict())
-        jobs = scraper.search_jobs(filters, max_results)
+
+        # Get country_indeed from jobspy config
+        country_indeed = self.jobspy_config.get("country_indeed", "USA")
+        jobs = scraper.search_jobs(filters, max_results, country_indeed=country_indeed)
 
         if save_results:
             self._save_results_toml(source=source, filters=filters, jobs=jobs)

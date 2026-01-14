@@ -61,7 +61,10 @@ class JobSpyScraper(BaseJobScraper):
         }
 
     def search_jobs(
-        self, filters: SearchFilters, max_results: int = 50
+        self,
+        filters: SearchFilters,
+        max_results: int = 50,
+        country_indeed: str = "USA",
     ) -> List[JobPosting]:
         """
         Search for jobs using JobSpy library.
@@ -69,6 +72,7 @@ class JobSpyScraper(BaseJobScraper):
         Args:
             filters: SearchFilters object with search criteria
             max_results: Maximum number of results to return
+            country_indeed: Country for Indeed searches (e.g., "USA", "Ireland")
 
         Returns:
             List of JobPosting objects
@@ -127,7 +131,7 @@ class JobSpyScraper(BaseJobScraper):
                 "location": location,
                 "results_wanted": max_results,
                 "hours_old": hours_old,
-                "country_indeed": "USA",  # Can be made configurable
+                "country_indeed": country_indeed,
                 "job_type": job_type,
             }
 

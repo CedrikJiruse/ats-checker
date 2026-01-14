@@ -9,6 +9,9 @@ Key features:
 - Backward-compatible JSON loading:
   - If a JSON config is found/used, it will be migrated to TOML (best-effort)
     unless a TOML config already exists.
+- Profile overlay loading (TOML):
+  - If the main config has a `[profile] file = "..."`, that TOML is loaded and merged
+    BEFORE the main config (defaults -> profile -> main -> CLI), so the main config wins.
 - New settings for:
   - multiple AI agents
   - scoring system + external weights TOML file
@@ -25,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
@@ -33,6 +37,8 @@ try:
     import tomllib  # Python 3.11+
 except Exception as e:  # pragma: no cover
     tomllib = None
+
+logger = logging.getLogger(__name__)
 
 
 # -----------------------
@@ -125,9 +131,37 @@ DEFAULTS: Dict[str, Any] = {
         # Example pattern: "{resume_name}/{job_title}/{timestamp}"
         "output_subdir_pattern": "{resume_name}/{job_title}/{timestamp}",
         "write_score_summary_file": True,
+        "score_summary_filename": "scores.toml",
+        # Performance
+        "max_concurrent_requests": 2,
+        "score_cache_enabled": True,
+        # Usability / artifacts
+        "write_manifest_file": True,
+        "manifest_filename": "manifest.toml",
+        # Profiles (config presets)
+        "profiles_folder": "config/profiles",
+        "default_profile": "safe.toml",
     },
     "job_search": {
         "max_job_results_per_search": 50,
+        "defaults": {
+            "location": "",
+            "keywords": "",
+            "remote_only": False,
+            "date_posted": "",
+            "job_type": [],
+            "experience_level": [],
+        },
+        "jobspy": {
+            "country_indeed": "USA",
+        },
+        "portals": {
+            "linkedin": {"enabled": True, "display_name": "LinkedIn"},
+            "indeed": {"enabled": True, "display_name": "Indeed"},
+            "glassdoor": {"enabled": True, "display_name": "Glassdoor"},
+            "google": {"enabled": True, "display_name": "Google Jobs"},
+            "ziprecruiter": {"enabled": True, "display_name": "ZipRecruiter"},
+        },
     },
 }
 
@@ -175,6 +209,19 @@ class Config:
     structured_output_format: str
     output_subdir_pattern: str
     write_score_summary_file: bool
+    score_summary_filename: str
+
+    # Performance
+    max_concurrent_requests: int
+    score_cache_enabled: bool
+
+    # Usability / artifacts
+    write_manifest_file: bool
+    manifest_filename: str
+
+    # Profiles
+    profiles_folder: str
+    default_profile: str
 
     # Schema validation
     schema_validation_enabled: bool
@@ -187,6 +234,9 @@ class Config:
 
     # Job search
     max_job_results_per_search: int
+    job_search_defaults: Dict[str, Any]
+    job_search_jobspy: Dict[str, Any]
+    job_search_portals: Dict[str, Dict[str, Any]]
 
     def to_dict(self) -> Dict[str, Any]:
         # Keep a stable, explicit representation for printing/debugging.
@@ -228,9 +278,19 @@ class Config:
                 "recommendations_max_items": self.recommendations_max_items,
                 "output_subdir_pattern": self.output_subdir_pattern,
                 "write_score_summary_file": self.write_score_summary_file,
+                "score_summary_filename": self.score_summary_filename,
+                "max_concurrent_requests": self.max_concurrent_requests,
+                "score_cache_enabled": self.score_cache_enabled,
+                "write_manifest_file": self.write_manifest_file,
+                "manifest_filename": self.manifest_filename,
+                "profiles_folder": self.profiles_folder,
+                "default_profile": self.default_profile,
             },
             "job_search": {
                 "max_job_results_per_search": self.max_job_results_per_search,
+                "defaults": self.job_search_defaults,
+                "jobspy": self.job_search_jobspy,
+                "portals": self.job_search_portals,
             },
         }
 
@@ -265,27 +325,46 @@ def load_config(
 
     loaded_from_json = False
     if resolved_path is not None and os.path.exists(resolved_path):
+        # Load the main config file into a temporary dict first so we can discover
+        # an optional profile overlay.
+        file_data: Dict[str, Any] = {}
         if file_kind == "toml":
             file_data = _load_toml_file(resolved_path)
-            _deep_merge(raw, file_data)
         elif file_kind == "json":
             file_data = _load_json_file(resolved_path)
             # JSON legacy configs are flat; map them into the new nested schema.
             file_data = _map_legacy_json_config_to_toml_shape(file_data)
-            _deep_merge(raw, file_data)
             loaded_from_json = True
         else:
             # Unknown extension: attempt TOML then JSON.
             try:
                 file_data = _load_toml_file(resolved_path)
-                _deep_merge(raw, file_data)
                 file_kind = "toml"
             except Exception:
                 file_data = _load_json_file(resolved_path)
                 file_data = _map_legacy_json_config_to_toml_shape(file_data)
-                _deep_merge(raw, file_data)
                 loaded_from_json = True
                 file_kind = "json"
+
+        # Apply profile overlay (TOML only) before applying the main config.
+        # Merge order: defaults -> profile -> main config -> CLI overrides
+        profile_path = _resolve_profile_overlay_path(
+            main_config=file_data,
+            main_config_path=resolved_path,
+        )
+        if profile_path:
+            try:
+                profile_data = _load_toml_file(profile_path)
+                _deep_merge(raw, profile_data)
+            except Exception as e:
+                # Best-effort: profile overlay should never block startup
+                logger.warning(
+                    "Failed to load profile overlay from '%s': %s",
+                    profile_path,
+                    e,
+                )
+
+        _deep_merge(raw, file_data)
 
     # Apply CLI overrides
     if cli_args is not None:
@@ -362,6 +441,43 @@ def _default_toml_path_for(json_path: Optional[str]) -> str:
         return "config.toml"
     base, _ = os.path.splitext(json_path)
     return base + ".toml"
+
+
+def _resolve_profile_overlay_path(
+    main_config: Dict[str, Any], main_config_path: str
+) -> Optional[str]:
+    """
+    Resolve an optional profile overlay file path.
+
+    Supported config shape:
+      [profile]
+      file = "config/profiles/safe.toml"
+
+    Rules:
+    - Only applies when the profile is TOML (we load via _load_toml_file).
+    - Relative paths are resolved relative to the directory containing the main config file.
+    """
+    if not isinstance(main_config, dict):
+        return None
+
+    profile = main_config.get("profile", {})
+    if not isinstance(profile, dict):
+        return None
+
+    profile_file = profile.get("file")
+    if not isinstance(profile_file, str) or not profile_file.strip():
+        return None
+
+    profile_file = profile_file.strip()
+
+    base_dir = (
+        os.path.dirname(os.path.abspath(main_config_path)) if main_config_path else ""
+    )
+    candidate = profile_file
+    if not os.path.isabs(candidate) and base_dir:
+        candidate = os.path.join(base_dir, candidate)
+
+    return candidate if os.path.exists(candidate) else None
 
 
 # -----------------------
@@ -684,6 +800,61 @@ def _build_config(raw: Dict[str, Any]) -> Config:
             DEFAULTS["processing"]["write_score_summary_file"],
         )
     )
+    score_summary_filename = str(
+        _deep_get(
+            raw,
+            ("processing", "score_summary_filename"),
+            DEFAULTS["processing"]["score_summary_filename"],
+        )
+    )
+
+    # Performance
+    max_concurrent_requests = int(
+        _deep_get(
+            raw,
+            ("processing", "max_concurrent_requests"),
+            DEFAULTS["processing"]["max_concurrent_requests"],
+        )
+    )
+    score_cache_enabled = bool(
+        _deep_get(
+            raw,
+            ("processing", "score_cache_enabled"),
+            DEFAULTS["processing"]["score_cache_enabled"],
+        )
+    )
+
+    # Usability / artifacts
+    write_manifest_file = bool(
+        _deep_get(
+            raw,
+            ("processing", "write_manifest_file"),
+            DEFAULTS["processing"]["write_manifest_file"],
+        )
+    )
+    manifest_filename = str(
+        _deep_get(
+            raw,
+            ("processing", "manifest_filename"),
+            DEFAULTS["processing"]["manifest_filename"],
+        )
+    )
+
+    # Profiles
+    profiles_folder = str(
+        _deep_get(
+            raw,
+            ("processing", "profiles_folder"),
+            DEFAULTS["processing"]["profiles_folder"],
+        )
+    )
+    default_profile = str(
+        _deep_get(
+            raw,
+            ("processing", "default_profile"),
+            DEFAULTS["processing"]["default_profile"],
+        )
+    )
 
     # Job search
     max_job_results_per_search = int(
@@ -693,6 +864,46 @@ def _build_config(raw: Dict[str, Any]) -> Config:
             DEFAULTS["job_search"]["max_job_results_per_search"],
         )
     )
+
+    job_search_defaults = _deep_get(
+        raw,
+        ("job_search", "defaults"),
+        DEFAULTS["job_search"]["defaults"],
+    )
+    if not isinstance(job_search_defaults, dict):
+        job_search_defaults = _deep_copy(DEFAULTS["job_search"]["defaults"])
+
+    job_search_jobspy = _deep_get(
+        raw,
+        ("job_search", "jobspy"),
+        DEFAULTS["job_search"]["jobspy"],
+    )
+    if not isinstance(job_search_jobspy, dict):
+        job_search_jobspy = _deep_copy(DEFAULTS["job_search"]["jobspy"])
+
+    job_search_portals = _deep_get(
+        raw,
+        ("job_search", "portals"),
+        DEFAULTS["job_search"]["portals"],
+    )
+    if not isinstance(job_search_portals, dict):
+        job_search_portals = _deep_copy(DEFAULTS["job_search"]["portals"])
+
+    # Validate config paths consistency
+    if iterate_until_score_reached and not os.path.exists(scoring_weights_file):
+        logger.warning(
+            "iterate_until_score_reached is True but scoring_weights_file not found: %s",
+            scoring_weights_file,
+        )
+
+    if schema_validation_enabled and resume_schema_path:
+        # Make absolute path if needed
+        schema_path_abs = os.path.abspath(resume_schema_path)
+        if not os.path.exists(schema_path_abs):
+            logger.warning(
+                "schema_validation_enabled is True but resume_schema_path not found: %s",
+                schema_path_abs,
+            )
 
     return Config(
         output_folder=output_folder,
@@ -710,6 +921,13 @@ def _build_config(raw: Dict[str, Any]) -> Config:
         recommendations_max_items=recommendations_max_items,
         output_subdir_pattern=output_subdir_pattern,
         write_score_summary_file=write_score_summary_file,
+        score_summary_filename=score_summary_filename,
+        max_concurrent_requests=max_concurrent_requests,
+        score_cache_enabled=score_cache_enabled,
+        write_manifest_file=write_manifest_file,
+        manifest_filename=manifest_filename,
+        profiles_folder=profiles_folder,
+        default_profile=default_profile,
         ai_provider=ai_provider,
         model_name=model_name,
         temperature=temperature,
@@ -728,6 +946,9 @@ def _build_config(raw: Dict[str, Any]) -> Config:
         max_regressions=max_regressions,
         structured_output_format=structured_output_format,
         max_job_results_per_search=max_job_results_per_search,
+        job_search_defaults=job_search_defaults,
+        job_search_jobspy=job_search_jobspy,
+        job_search_portals=job_search_portals,
     )
 
 
@@ -826,6 +1047,48 @@ def _apply_cli_overrides(raw: Dict[str, Any], cli_args: Any) -> Dict[str, Any]:
         args,
         ("processing", "write_score_summary_file"),
         "write_score_summary_file",
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "score_summary_filename"),
+        "score_summary_filename",
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "max_concurrent_requests"),
+        "max_concurrent_requests",
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "score_cache_enabled"),
+        "score_cache_enabled",
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "write_manifest_file"),
+        "write_manifest_file",
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "manifest_filename"),
+        "manifest_filename",
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "profiles_folder"),
+        "profiles_folder",
+    )
+    _set_if_present(
+        data,
+        args,
+        ("processing", "default_profile"),
+        "default_profile",
     )
     _set_if_present(
         data,
@@ -1097,6 +1360,47 @@ if __name__ == "__main__":
         "--write_score_summary_file",
         action="store_true",
         help="Write a separate score summary file alongside outputs.",
+    )
+    parser.add_argument(
+        "--score_summary_filename",
+        type=str,
+        help='Score summary filename to write into each output bundle (default: "scores.toml").',
+    )
+
+    # Performance
+    parser.add_argument(
+        "--max_concurrent_requests",
+        type=int,
+        help="Maximum concurrent requests for batch processing (I/O bound).",
+    )
+    parser.add_argument(
+        "--score_cache_enabled",
+        action="store_true",
+        help="Enable caching of score computations within a run.",
+    )
+
+    # Usability / artifacts
+    parser.add_argument(
+        "--write_manifest_file",
+        action="store_true",
+        help="Write a manifest.toml file alongside outputs (metadata + scores + filenames).",
+    )
+    parser.add_argument(
+        "--manifest_filename",
+        type=str,
+        help='Manifest filename to write into each output bundle (default: "manifest.toml").',
+    )
+
+    # Profiles
+    parser.add_argument(
+        "--profiles_folder",
+        type=str,
+        help='Folder containing config profiles (default: "config/profiles").',
+    )
+    parser.add_argument(
+        "--default_profile",
+        type=str,
+        help='Default profile file name to use as a base (default: "safe.toml").',
     )
 
     parser.add_argument(

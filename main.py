@@ -32,10 +32,11 @@ def display_menu():
     print("2. Convert files to appropriate format")
     print("3. Job Search & Scraping")
     print("4. View/Edit settings")
-    print("5. View available files")
-    print("6. View generated outputs")
-    print("7. Test OCR functionality")
-    print("8. Exit")
+    print("5. AI Model Configuration")
+    print("6. View available files")
+    print("7. View generated outputs")
+    print("8. Test OCR functionality")
+    print("9. Exit")
 
 
 def extract_text_from_file(filepath):
@@ -367,6 +368,11 @@ def process_all_resumes(config):
             recommendations_max_items=config.recommendations_max_items,
             output_subdir_pattern=config.output_subdir_pattern,
             write_score_summary_file=config.write_score_summary_file,
+            score_summary_filename=config.score_summary_filename,
+            write_manifest_file=config.write_manifest_file,
+            manifest_filename=config.manifest_filename,
+            max_concurrent_requests=config.max_concurrent_requests,
+            score_cache_enabled=config.score_cache_enabled,
         )
         processor.process_resumes()
         logging.info("Resume processing completed successfully.")
@@ -398,7 +404,7 @@ def process_resumes_with_job_description(config):
 
         choice = input("\nEnter the number of the job description to use: ").strip()
         if not choice.isdigit() or int(choice) < 1 or int(choice) > len(job_desc_list):
-            print("Invalid choice.")
+            print(f"Invalid choice. Please enter 1-{len(job_desc_list)}.")
             input("\nPress Enter to continue...")
             return
 
@@ -435,6 +441,11 @@ def process_resumes_with_job_description(config):
             recommendations_max_items=config.recommendations_max_items,
             output_subdir_pattern=config.output_subdir_pattern,
             write_score_summary_file=config.write_score_summary_file,
+            score_summary_filename=config.score_summary_filename,
+            write_manifest_file=config.write_manifest_file,
+            manifest_filename=config.manifest_filename,
+            max_concurrent_requests=config.max_concurrent_requests,
+            score_cache_enabled=config.score_cache_enabled,
         )
         processor.process_resumes(job_description_name=selected_jd)
         logging.info("Resume processing completed successfully.")
@@ -471,7 +482,7 @@ def process_specific_resume_with_job(config):
 
         choice = input("\nEnter the number of the resume to process: ").strip()
         if not choice.isdigit() or int(choice) < 1 or int(choice) > len(resume_files):
-            print("Invalid choice.")
+            print(f"Invalid choice. Please enter 1-{len(resume_files)}.")
             input("\nPress Enter to continue...")
             return
 
@@ -503,7 +514,7 @@ def process_specific_resume_with_job(config):
             or int(jd_choice) < 1
             or int(jd_choice) > len(job_desc_list)
         ):
-            print("Invalid choice.")
+            print(f"Invalid choice. Please enter 1-{len(job_desc_list)}.")
             input("\nPress Enter to continue...")
             return
 
@@ -523,6 +534,10 @@ def process_specific_resume_with_job(config):
                 state_manager, tesseract_cmd=config.tesseract_cmd
             )
             resume_content = ocr_handler.extract_text_from_image(resume_path)
+            if not resume_content:
+                print(f"Failed to extract text from image: {resume_path}")
+                input("\nPress Enter to continue...")
+                return
         else:
             resume_content = extract_text_from_file(resume_path)
 
@@ -560,6 +575,11 @@ def process_specific_resume_with_job(config):
             recommendations_max_items=config.recommendations_max_items,
             output_subdir_pattern=config.output_subdir_pattern,
             write_score_summary_file=config.write_score_summary_file,
+            score_summary_filename=config.score_summary_filename,
+            write_manifest_file=config.write_manifest_file,
+            manifest_filename=config.manifest_filename,
+            max_concurrent_requests=config.max_concurrent_requests,
+            score_cache_enabled=config.score_cache_enabled,
         )
 
         # Process just this one resume
@@ -739,11 +759,32 @@ def edit_setting(config, config_file_path, setting_choice):
                     print("Invalid integer value.")
                     input("\nPress Enter to continue...")
                     return
+
+                # Bounds checking
+                if key == "num_versions_per_job" and not (1 <= new_value <= 20):
+                    print("num_versions_per_job must be between 1 and 20.")
+                    input("\nPress Enter to continue...")
+                    return
+                elif key == "top_k" and not (1 <= new_value <= 100):
+                    print("top_k must be between 1 and 100.")
+                    input("\nPress Enter to continue...")
+                    return
+                elif key == "max_output_tokens" and not (256 <= new_value <= 8192):
+                    print("max_output_tokens must be between 256 and 8192.")
+                    input("\nPress Enter to continue...")
+                    return
+
             elif key in ["temperature", "top_p"]:
                 try:
                     new_value = float(new_value)
                 except ValueError:
                     print("Invalid float value.")
+                    input("\nPress Enter to continue...")
+                    return
+
+                # Bounds checking
+                if not (0.0 <= new_value <= 1.0):
+                    print(f"{key} must be between 0.0 and 1.0.")
                     input("\nPress Enter to continue...")
                     return
 
@@ -852,10 +893,13 @@ def test_ocr_functionality(config):
             print(f"Tesseract OCR is available. Version: {version}")
         except Exception as version_error:
             print(f"Could not get Tesseract version: {version_error}")
-            print("Tesseract might be installed but not properly configured.")
-            print(
-                "Please ensure Tesseract OCR is installed and added to your system PATH."
-            )
+            print("\nError: Tesseract OCR not properly configured.")
+            print("  1. Install Tesseract:")
+            print("     - Windows: https://github.com/UB-Mannheim/tesseract/wiki")
+            print("     - macOS: brew install tesseract")
+            print("     - Linux: sudo apt-get install tesseract-ocr")
+            print("  2. Add Tesseract to PATH or set TESSERACT_CMD in config")
+            print("  3. Verify installation: tesseract --version")
             input("\nPress Enter to continue...")
             return
     except ImportError as e:
@@ -908,7 +952,7 @@ def test_ocr_functionality(config):
             )
             extracted_text = input_handler.extract_text_from_image(file_path)
 
-            if extracted_text.strip():
+            if extracted_text and extracted_text.strip():
                 print(f"\n--- OCR Results for {selected_file} ---")
                 print(extracted_text)
                 print("\n--- End of OCR Results ---")
@@ -1019,14 +1063,29 @@ def new_job_search(config, job_scraper_manager):
     elif source_choice == str(len(sources) + 1):
         selected_sources = sources
     else:
-        print("Invalid choice.")
+        print(f"Invalid choice. Please enter 1-{len(sources) + 1}.")
         input("\nPress Enter to continue...")
         return
 
-    # Get search parameters
-    print("\nEnter search criteria (leave blank to skip):")
-    keywords = input("Keywords (e.g., 'software engineer python'): ").strip()
-    location = input("Location (e.g., 'Dublin', 'Remote'): ").strip()
+    # Get defaults from config
+    defaults = config.job_search_defaults
+    default_keywords = defaults.get("keywords", "")
+    default_location = defaults.get("location", "")
+    default_remote = defaults.get("remote_only", False)
+    default_date = defaults.get("date_posted", "")
+
+    # Get search parameters - show defaults in prompts
+    print("\nEnter search criteria (press Enter to use default):")
+
+    if default_keywords:
+        keywords = input(f"Keywords [{default_keywords}]: ").strip() or default_keywords
+    else:
+        keywords = input("Keywords (e.g., 'software engineer python'): ").strip()
+
+    if default_location:
+        location = input(f"Location [{default_location}]: ").strip() or default_location
+    else:
+        location = input("Location (e.g., 'Dublin', 'Remote'): ").strip()
 
     # Job type
     print("\nJob Type (select multiple by entering numbers separated by commas):")
@@ -1042,9 +1101,13 @@ def new_job_search(config, job_scraper_manager):
             if num.strip().isdigit():
                 job_types.append(job_type_map.get(int(num.strip()), ""))
 
-    # Remote only
-    remote_input = input("Remote only? (y/n): ").strip().lower()
-    remote_only = remote_input == "y"
+    # Remote only - show default
+    default_remote_str = "y" if default_remote else "n"
+    remote_input = input(f"Remote only? (y/n) [{default_remote_str}]: ").strip().lower()
+    if remote_input == "":
+        remote_only = default_remote
+    else:
+        remote_only = remote_input == "y"
 
     # Experience level
     print(
@@ -1063,13 +1126,14 @@ def new_job_search(config, job_scraper_manager):
             if num.strip().isdigit():
                 experience_levels.append(exp_map.get(int(num.strip()), ""))
 
-    # Date posted
+    # Date posted - show default
     print("\nDate Posted:")
     print("1. Last 24 hours")
     print("2. Last week")
     print("3. Last month")
     print("4. Any time")
-    date_choice = input("Select (1-4): ").strip()
+    default_date_display = {"24h": "1", "week": "2", "month": "3"}.get(default_date, "4")
+    date_choice = input(f"Select (1-4) [{default_date_display}]: ").strip() or default_date_display
     date_map = {"1": "24h", "2": "week", "3": "month", "4": None}
     date_posted = date_map.get(date_choice)
 
@@ -1410,17 +1474,325 @@ def export_jobs_to_descriptions(config, job_scraper_manager):
     input("\nPress Enter to continue...")
 
 
+def ai_model_configuration_menu(config, config_file_path):
+    """Handle AI model configuration options"""
+    while True:
+        print("\n--- AI Model Configuration ---")
+        print("Current Configuration:")
+        view_current_configuration(config)
+        print("\nOptions:")
+        print("1. Change model for a specific agent")
+        print("2. Load a provider profile")
+        print("3. Test AI configuration")
+        print("4. View available models")
+        print("5. Back to main menu")
+
+        choice = input("Enter your choice (1-5): ").strip()
+
+        if choice == "1":
+            change_agent_model(config, config_file_path)
+        elif choice == "2":
+            load_provider_profile(config, config_file_path)
+        elif choice == "3":
+            test_ai_configuration(config)
+        elif choice == "4":
+            view_available_models()
+        elif choice == "5":
+            break
+        else:
+            print("Invalid choice. Please try again.")
+
+
+def view_current_configuration(config):
+    """Display current AI model configuration"""
+    agents = config.ai_agents
+    for agent_name, agent_config in agents.items():
+        print(f"  {agent_name}: {agent_config.provider}/{agent_config.model_name}")
+
+
+def change_agent_model(config, config_file_path):
+    """Change the provider and model for a specific agent"""
+    print("\n--- Change Agent Model ---")
+
+    agents = config.ai_agents
+    agent_names = list(agents.keys())
+
+    print("Select agent to modify:")
+    for i, agent_name in enumerate(agent_names, 1):
+        current = agents[agent_name]
+        print(f"{i}. {agent_name} (current: {current.provider}/{current.model_name})")
+
+    choice = input(f"\nEnter choice (1-{len(agent_names)}): ").strip()
+
+    if not choice.isdigit() or not (1 <= int(choice) <= len(agent_names)):
+        print("Invalid choice.")
+        return
+
+    agent_name = agent_names[int(choice) - 1]
+
+    # Select provider
+    providers = ["gemini", "openai", "anthropic", "llama"]
+    print("\nSelect provider:")
+    for i, provider in enumerate(providers, 1):
+        print(f"{i}. {provider}")
+
+    provider_choice = input(f"Enter choice (1-{len(providers)}): ").strip()
+    if not provider_choice.isdigit() or not (1 <= int(provider_choice) <= len(providers)):
+        print("Invalid choice.")
+        return
+
+    selected_provider = providers[int(provider_choice) - 1]
+
+    # Get available models for provider
+    models = get_available_models_for_provider(selected_provider)
+    if not models:
+        print(f"No models found for {selected_provider}")
+        return
+
+    print(f"\nAvailable models for {selected_provider}:")
+    for i, model in enumerate(models, 1):
+        print(f"{i}. {model}")
+
+    model_choice = input(f"Enter choice (1-{len(models)}): ").strip()
+    if not model_choice.isdigit() or not (1 <= int(model_choice) <= len(models)):
+        print("Invalid choice.")
+        return
+
+    selected_model = models[int(model_choice) - 1]
+
+    # Update config
+    config.ai_agents[agent_name].provider = selected_provider
+    config.ai_agents[agent_name].model_name = selected_model
+
+    # Save to config file
+    try:
+        config.save_config(config_file_path)
+        print(f"\nSuccessfully updated {agent_name} to {selected_provider}/{selected_model}")
+        print("Configuration saved.")
+    except Exception as e:
+        print(f"Error saving configuration: {e}")
+
+    input("\nPress Enter to continue...")
+
+
+def get_available_models_for_provider(provider):
+    """Get list of available models for a provider"""
+    models_by_provider = {
+        "gemini": [
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-pro",
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-latest",
+        ],
+        "openai": [
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4-turbo",
+            "gpt-3.5-turbo",
+        ],
+        "anthropic": [
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-haiku-20241022",
+            "claude-3-opus-20250219",
+            "claude-3-sonnet-20240229",
+        ],
+        "llama": [
+            "meta-llama/Llama-3.3-70B-Instruct",
+            "meta-llama/Llama-3.1-70B-Instruct",
+            "meta-llama/Llama-3-70B-Instruct",
+        ],
+    }
+    return models_by_provider.get(provider, [])
+
+
+def load_provider_profile(config, config_file_path):
+    """Load a pre-configured provider profile (optimized for cost vs quality)"""
+    print("\n" + "=" * 60)
+    print("         PRESET CONFIGURATIONS (Cost vs Quality)")
+    print("=" * 60)
+
+    profiles = {
+        "1": {
+            "name": "Budget",
+            "path": "config/profiles/budget.toml",
+            "cost": "FREE or $0.50-1 per 100 resumes",
+            "quality": "Good",
+            "description": "Minimal cost - perfect for testing & learning",
+        },
+        "2": {
+            "name": "Balanced",
+            "path": "config/profiles/balanced.toml",
+            "cost": "$5-10 per 100 resumes",
+            "quality": "Excellent",
+            "description": "RECOMMENDED - best value, most users",
+        },
+        "3": {
+            "name": "Quality",
+            "path": "config/profiles/quality.toml",
+            "cost": "$20-50 per 100 resumes",
+            "quality": "Maximum",
+            "description": "Premium quality for competitive positions",
+        },
+    }
+
+    print("\nAvailable Presets:\n")
+    for key, profile in profiles.items():
+        print(f"{key}. {profile['name']:12} │ {profile['cost']:30} │ {profile['quality']:10}")
+        print(f"   {profile['description']}")
+        print()
+
+    print("For detailed comparison, see: docs/PROVIDER_PRESETS.md\n")
+
+    choice = input("Select preset (1-3): ").strip()
+
+    if choice not in profiles:
+        print("Invalid choice.")
+        input("\nPress Enter to continue...")
+        return
+
+    profile_info = profiles[choice]
+    profile_name = profile_info["name"]
+    profile_path = profile_info["path"]
+
+    # Check if profile file exists
+    if not os.path.exists(profile_path):
+        print(f"Profile file {profile_path} not found.")
+        input("\nPress Enter to continue...")
+        return
+
+    # Load profile config
+    try:
+        from config import load_config_from_file
+        profile_config = load_config_from_file(profile_path)
+
+        # Merge profile AI agents into current config
+        if hasattr(profile_config, 'ai_agents'):
+            config.ai_agents = profile_config.ai_agents
+            config.save_config(config_file_path)
+            print("\n" + "=" * 60)
+            print(f"✓ Successfully loaded {profile_name} preset!")
+            print("=" * 60)
+            print(f"\nCost: {profile_info['cost']}")
+            print(f"Quality: {profile_info['quality']}")
+            print(f"\nCurrent Configuration:")
+            view_current_configuration(config)
+            print("\nConfiguration saved!")
+        else:
+            print("Profile does not contain AI agent configuration.")
+    except Exception as e:
+        print(f"Error loading profile: {e}")
+
+    input("\nPress Enter to continue...")
+
+
+def test_ai_configuration(config):
+    """Test AI configuration by checking API connectivity"""
+    print("\n--- Test AI Configuration ---")
+    print("Testing connectivity for configured agents...\n")
+
+    agents = config.ai_agents
+    all_ok = True
+
+    for agent_name, agent_config in agents.items():
+        provider = agent_config.provider
+        model_name = agent_config.model_name
+
+        # Map provider to environment variable
+        env_vars = {
+            "gemini": "GEMINI_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "llama": ["TOGETHER_API_KEY", "GROQ_API_KEY"],
+        }
+
+        # Check if API key exists
+        required_env = env_vars.get(provider)
+        if isinstance(required_env, list):
+            has_key = any(os.environ.get(env) for env in required_env)
+            env_status = f"({' or '.join(required_env)})"
+        else:
+            has_key = os.environ.get(required_env) is not None
+            env_status = f"({required_env})"
+
+        if has_key:
+            print(f"✓ {agent_name:20} {provider:12} {model_name:40} - API key found {env_status}")
+        else:
+            print(f"✗ {agent_name:20} {provider:12} {model_name:40} - Missing {env_status}")
+            all_ok = False
+
+    if all_ok:
+        print("\n✓ All API keys are configured!")
+    else:
+        print("\n✗ Some API keys are missing. Please set up the required environment variables.")
+        print("\nAPI Key Setup Instructions:")
+        print("  Gemini: https://ai.google.dev/")
+        print("  OpenAI: https://platform.openai.com/api-keys")
+        print("  Anthropic: https://console.anthropic.com/")
+        print("  Llama (Together AI): https://www.together.ai/")
+        print("  Llama (Groq): https://console.groq.com/")
+
+    input("\nPress Enter to continue...")
+
+
+def view_available_models():
+    """Display all available models per provider"""
+    print("\n--- Available Models ---")
+
+    providers = {
+        "Gemini (Google)": {
+            "gemini-2.0-flash-exp": "Latest Gemini model (experimental)",
+            "gemini-1.5-pro": "Pro tier (high quality)",
+            "gemini-1.5-flash": "Flash tier (fast)",
+            "gemini-1.5-flash-latest": "Flash tier (latest)",
+        },
+        "OpenAI": {
+            "gpt-4o": "GPT-4 Omni (latest, high quality)",
+            "gpt-4o-mini": "GPT-4 Omni Mini (fast, cost-effective)",
+            "gpt-4-turbo": "GPT-4 Turbo (previous generation)",
+            "gpt-3.5-turbo": "GPT-3.5 Turbo (fast, cheap)",
+        },
+        "Anthropic": {
+            "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet (latest, high quality)",
+            "claude-3-5-haiku-20241022": "Claude 3.5 Haiku (fast, efficient)",
+            "claude-3-opus-20250219": "Claude 3 Opus (most capable, slower)",
+            "claude-3-sonnet-20240229": "Claude 3 Sonnet (previous generation)",
+        },
+        "Meta Llama (via Together AI or Groq)": {
+            "meta-llama/Llama-3.3-70B-Instruct": "Llama 3.3 70B (latest)",
+            "meta-llama/Llama-3.1-70B-Instruct": "Llama 3.1 70B",
+            "meta-llama/Llama-3-70B-Instruct": "Llama 3 70B",
+        },
+    }
+
+    for provider_name, models in providers.items():
+        print(f"\n{provider_name}:")
+        for model_id, description in models.items():
+            print(f"  {model_id}")
+            print(f"    {description}")
+
+    print("\n--- Recommendations ---")
+    print("  Enhancement: OpenAI GPT-4o or Anthropic Claude 3.5 Sonnet (best quality)")
+    print("  Job Summarization: OpenAI GPT-4o-mini or Anthropic Claude 3.5 Haiku (fast, cheap)")
+    print("  Scoring: Gemini Flash or OpenAI GPT-4o-mini (quick scoring)")
+    print("  Revision: OpenAI GPT-4o (high quality output)")
+
+    input("\nPress Enter to continue...")
+
+
 def main_menu(config, config_file_path):
     """Main menu loop"""
-    # Initialize job scraper manager
+    # Initialize job scraper manager with portal config and defaults
     job_scraper_manager = JobScraperManager(
         results_folder=config.job_search_results_folder,
         saved_searches_path=config.saved_searches_file,
+        portals_config=config.job_search_portals,
+        jobspy_config=config.job_search_jobspy,
+        search_defaults=config.job_search_defaults,
     )
 
     while True:
         display_menu()
-        choice = input("Enter your choice (1-8): ").strip()
+        choice = input("Enter your choice (1-9): ").strip()
 
         if choice == "1":
             process_resumes_menu(config)
@@ -1431,12 +1803,14 @@ def main_menu(config, config_file_path):
         elif choice == "4":
             view_edit_settings(config, config_file_path)
         elif choice == "5":
-            view_available_files(config)
+            ai_model_configuration_menu(config, config_file_path)
         elif choice == "6":
-            view_generated_outputs(config)
+            view_available_files(config)
         elif choice == "7":
-            test_ocr_functionality(config)
+            view_generated_outputs(config)
         elif choice == "8":
+            test_ocr_functionality(config)
+        elif choice == "9":
             print("Thank you for using ATS Resume Checker!")
             break
         else:
@@ -1533,6 +1907,11 @@ def main():
                 recommendations_max_items=config.recommendations_max_items,
                 output_subdir_pattern=config.output_subdir_pattern,
                 write_score_summary_file=config.write_score_summary_file,
+                score_summary_filename=config.score_summary_filename,
+                write_manifest_file=config.write_manifest_file,
+                manifest_filename=config.manifest_filename,
+                max_concurrent_requests=config.max_concurrent_requests,
+                score_cache_enabled=config.score_cache_enabled,
             )
             processor.process_resumes(job_description_name=job_description_to_use)
             logging.info("Resume processing completed successfully.")

@@ -68,6 +68,18 @@ class OutputGenerator:
         """
         self.output_folder = os.path.abspath(output_folder)
         os.makedirs(self.output_folder, exist_ok=True)
+
+        # Test writability of output folder
+        try:
+            test_file = os.path.join(self.output_folder, ".write_test")
+            with open(test_file, "w") as f:
+                f.write("test")
+            os.remove(test_file)
+        except Exception as e:
+            raise RuntimeError(
+                f"Cannot write to output folder {self.output_folder}: {e}"
+            ) from e
+
         self.structured_output_format = (structured_output_format or "json").lower()
         self.output_subdir_pattern = (
             output_subdir_pattern or "{resume_name}/{job_title}/{timestamp}"
@@ -88,9 +100,19 @@ class OutputGenerator:
     def _sanitize_path_segment(self, segment: str) -> str:
         # Keep it Windows-safe and filesystem-safe.
         # Replace reserved chars: <>:"/\|?*
+        # Also prevent directory traversal
+        seg_str = str(segment or "").strip()
+
+        # Block directory traversal attempts
+        if seg_str in (".", ".."):
+            return "unknown"
+        if ".." in seg_str:
+            # Replace .. with underscores to prevent traversal
+            seg_str = seg_str.replace("..", "__")
+
         bad = '<>:"/\\|?*'
         out = []
-        for ch in str(segment or ""):
+        for ch in seg_str:
             out.append("_" if ch in bad else ch)
         s = "".join(out).strip()
         return s or "unknown"
@@ -273,8 +295,10 @@ class OutputGenerator:
 
                     if isinstance(match_rep, dict):
                         categories = match_rep.get("categories")
+                        kw_details = None
+
                         if isinstance(categories, list):
-                            kw_details = None
+                            # Legacy format: list of category dicts
                             for cat in categories:
                                 if not isinstance(cat, dict):
                                     continue
@@ -283,29 +307,36 @@ class OutputGenerator:
                                     if isinstance(details, dict):
                                         kw_details = details
                                     break
+                        elif isinstance(categories, dict):
+                            # TOML-friendly format: categories keyed by name
+                            ko = categories.get("keyword_overlap")
+                            if isinstance(ko, dict):
+                                details = ko.get("details")
+                                if isinstance(details, dict):
+                                    kw_details = details
 
-                            if isinstance(kw_details, dict):
-                                missing = kw_details.get("sample_missing")
-                                overlap = kw_details.get("sample_overlap")
+                        if isinstance(kw_details, dict):
+                            missing = kw_details.get("sample_missing")
+                            overlap = kw_details.get("sample_overlap")
 
-                                has_overlap = (
-                                    isinstance(overlap, list) and len(overlap) > 0
-                                )
-                                has_missing = (
-                                    isinstance(missing, list) and len(missing) > 0
-                                )
+                            has_overlap = (
+                                isinstance(overlap, list) and len(overlap) > 0
+                            )
+                            has_missing = (
+                                isinstance(missing, list) and len(missing) > 0
+                            )
 
-                                if has_overlap or has_missing:
-                                    f.write("Keyword Match:\n")
-                                    if has_overlap:
-                                        f.write(
-                                            f"  Matched: {', '.join(str(x) for x in overlap[:20])}\n"
-                                        )
-                                    if has_missing:
-                                        f.write(
-                                            f"  Missing: {', '.join(str(x) for x in missing[:20])}\n"
-                                        )
-                                    f.write("\n")
+                            if has_overlap or has_missing:
+                                f.write("Keyword Match:\n")
+                                if has_overlap:
+                                    f.write(
+                                        f"  Matched: {', '.join(str(x) for x in overlap[:20])}\n"
+                                    )
+                                if has_missing:
+                                    f.write(
+                                        f"  Missing: {', '.join(str(x) for x in missing[:20])}\n"
+                                    )
+                                f.write("\n")
 
                 # Projects
                 projects = resume_data.get("projects", [])
@@ -370,6 +401,7 @@ class OutputGenerator:
 
                         cats = rep.get("categories")
                         if isinstance(cats, list):
+                            # Legacy format: categories as a list of dicts
                             for c in cats:
                                 if not isinstance(c, dict):
                                     continue
@@ -377,6 +409,19 @@ class OutputGenerator:
                                 s = c.get("score")
                                 w = c.get("weight")
                                 if n is None or s is None:
+                                    continue
+                                if w is not None:
+                                    f.write(f"    - {n}: {s} (weight {w})\n")
+                                else:
+                                    f.write(f"    - {n}: {s}\n")
+                        elif isinstance(cats, dict):
+                            # TOML-friendly format: categories as a table/dict keyed by category name
+                            for n, c in cats.items():
+                                if not isinstance(n, str) or not isinstance(c, dict):
+                                    continue
+                                s = c.get("score")
+                                w = c.get("weight")
+                                if s is None:
                                     continue
                                 if w is not None:
                                     f.write(f"    - {n}: {s} (weight {w})\n")

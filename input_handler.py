@@ -33,7 +33,7 @@ class InputHandler:
         self.job_description_folder = job_description_folder
         self.tesseract_cmd = tesseract_cmd
 
-    def extract_text_from_image(self, image_path: str) -> str:
+    def extract_text_from_image(self, image_path: str) -> Optional[str]:
         """
         Extract text from an image using OCR.
         
@@ -76,44 +76,44 @@ class InputHandler:
             return text
         except FileNotFoundError as e:
             logger.error(f"Tesseract executable not found. Please ensure Tesseract OCR is installed and added to your system PATH. Error: {e}")
-            return ""
+            return None
         except Exception as e:
             # Handle pytesseract errors generically since we're lazy loading
             if "TesseractNotFoundError" in str(type(e).__name__) or "TesseractError" in str(type(e).__name__):
                 logger.error(f"Tesseract error occurred while processing image {image_path}: {e}")
             else:
                 logger.error(f"Unexpected error extracting text from image {image_path}: {e}", exc_info=True)
-            return ""
+            return None
 
-    def extract_text_from_pdf(self, pdf_path: str) -> str:
+    def extract_text_from_pdf(self, pdf_path: str) -> Optional[str]:
         """
         Extract text from a PDF file.
-        
+
         Args:
             pdf_path: The path to the PDF file.
-            
+
         Returns:
-            The extracted text from the PDF.
+            The extracted text from the PDF, or None if extraction fails.
         """
         if not PDF_AVAILABLE:
             logger.error("PDF functionality is not available. Please install PyPDF2.")
-            return ""
-        
+            return None
+
         try:
             # Lazy import of PDF dependencies
             import PyPDF2
-            
+
             with open(pdf_path, 'rb') as file:
                 reader = PyPDF2.PdfReader(file)
                 text = ""
                 for page in reader.pages:
                     text += page.extract_text() + "\n"
-                
+
             logger.info(f"Successfully extracted text from PDF: {pdf_path}")
             return text
         except Exception as e:
             logger.error(f"Error extracting text from PDF {pdf_path}: {e}", exc_info=True)
-            return ""
+            return None
 
     def extract_text_from_json(self, json_path: str) -> str:
         """
@@ -250,7 +250,7 @@ class InputHandler:
                         if not self.state_manager.is_processed(file_hash):
                             # Extract text from image using OCR
                             resume_content = self.extract_text_from_image(filepath)
-                            if resume_content.strip():
+                            if resume_content and resume_content.strip():
                                 resumes_to_process.append({
                                     "filepath": filepath,
                                     "content": resume_content,
@@ -275,7 +275,7 @@ class InputHandler:
                         if not self.state_manager.is_processed(file_hash):
                             # Extract text from PDF
                             resume_content = self.extract_text_from_pdf(filepath)
-                            if resume_content.strip():
+                            if resume_content and resume_content.strip():
                                 resumes_to_process.append({
                                     "filepath": filepath,
                                     "content": resume_content,

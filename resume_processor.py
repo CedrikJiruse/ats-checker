@@ -1,7 +1,10 @@
+import concurrent.futures
+import hashlib
 import json
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from gemini_integrator import GeminiAPIIntegrator
@@ -9,10 +12,125 @@ from input_handler import InputHandler
 from output_generator import OutputGenerator
 from recommendations import generate_recommendations
 from schema_validation import load_schema, validate_json_str
-from scoring import compute_iteration_score, score_match, score_resume
+from scoring import compute_iteration_score, score_job, score_match, score_resume
 from state_manager import StateManager
 
+try:
+    import toml_io  # project-local TOML writer (dependency-free)
+except Exception:
+    toml_io = None
+
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_for_toml(value: Any) -> Any:
+    """
+    TOML does not support null/None or list-of-dicts with this project's minimal TOML writer.
+    This helper:
+    - drops None entries
+    - converts dict keys to strings
+    - drops list elements that are dicts (caller should pre-flatten if needed)
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for k, v in value.items():
+            if not isinstance(k, str):
+                continue
+            sv = _sanitize_for_toml(v)
+            if sv is None:
+                continue
+            out[k] = sv
+        return out
+
+    if isinstance(value, list):
+        out_list: List[Any] = []
+        for item in value:
+            if isinstance(item, dict):
+                # avoid list-of-dicts in TOML output
+                logger.debug(
+                    "Dropping dict from list during TOML sanitization: %s",
+                    str(item)[:100],  # Limit log size
+                )
+                continue
+            sv = _sanitize_for_toml(item)
+            if sv is None:
+                continue
+            out_list.append(sv)
+        return out_list
+
+    return value
+
+
+def _score_report_to_toml(report: Any) -> Dict[str, Any]:
+    """
+    Convert a scoring report (typically ScoreReport.as_dict()) into a TOML-friendly shape.
+
+    Key idea:
+    - Replace `categories: [ {name, score, ...}, ... ]` with:
+        categories.<category_name>.score = ...
+        categories.<category_name>.weight = ...
+        categories.<category_name>.details = {...}
+
+    This preserves detailed scoring in TOML outputs without using list-of-dicts.
+    """
+    if not isinstance(report, dict):
+        return {}
+
+    out: Dict[str, Any] = {}
+
+    kind = report.get("kind")
+    if isinstance(kind, str):
+        out["kind"] = kind
+
+    total = report.get("total")
+    if isinstance(total, (int, float)):
+        out["total"] = float(total)
+
+    meta = report.get("meta")
+    if isinstance(meta, dict):
+        out["meta"] = _sanitize_for_toml(meta) or {}
+
+    categories = report.get("categories")
+    categories_tbl: Dict[str, Any] = {}
+    if isinstance(categories, list):
+        used_names = set()
+        for idx, c in enumerate(categories):
+            if not isinstance(c, dict):
+                continue
+
+            name = c.get("name")
+            if not isinstance(name, str) or not name.strip():
+                name = f"category_{idx}"
+
+            base = name.strip()
+            key = base
+            suffix = 2
+            while key in used_names:
+                key = f"{base}_{suffix}"
+                suffix += 1
+            used_names.add(key)
+
+            entry: Dict[str, Any] = {}
+
+            score = c.get("score")
+            if isinstance(score, (int, float)):
+                entry["score"] = float(score)
+
+            weight = c.get("weight")
+            if isinstance(weight, (int, float)):
+                entry["weight"] = float(weight)
+
+            details = c.get("details")
+            if isinstance(details, dict):
+                entry["details"] = _sanitize_for_toml(details) or {}
+
+            categories_tbl[key] = entry
+
+    out["categories"] = categories_tbl
+    return out
 
 
 @dataclass
@@ -60,6 +178,9 @@ class ResumeProcessor:
         iteration_patience: int = 2,
         stop_on_regression: bool = True,
         max_regressions: int = 2,
+        # Performance
+        max_concurrent_requests: int = 1,
+        score_cache_enabled: bool = True,
         state_filepath: Optional[str] = None,
         # New: schema validation / recommendations / output layout
         schema_validation_enabled: bool = False,
@@ -68,7 +189,11 @@ class ResumeProcessor:
         recommendations_enabled: bool = False,
         recommendations_max_items: int = 5,
         output_subdir_pattern: str = "{resume_name}/{job_title}/{timestamp}",
+        # Output artifacts (TOML)
         write_score_summary_file: bool = True,
+        score_summary_filename: str = "scores.toml",
+        write_manifest_file: bool = True,
+        manifest_filename: str = "manifest.toml",
     ):
         self.state_manager = StateManager(
             state_filepath or "data/processed_resumes_state.toml"
@@ -117,7 +242,17 @@ class ResumeProcessor:
         self.schema_validation_max_retries = int(schema_validation_max_retries)
         self.recommendations_enabled = bool(recommendations_enabled)
         self.recommendations_max_items = int(recommendations_max_items)
+
+        # Performance
+        self.max_concurrent_requests = max(1, int(max_concurrent_requests))
+        self.score_cache_enabled = bool(score_cache_enabled)
+        self._score_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+        # Output artifacts (TOML)
         self.write_score_summary_file = bool(write_score_summary_file)
+        self.score_summary_filename = str(score_summary_filename or "scores.toml")
+        self.write_manifest_file = bool(write_manifest_file)
+        self.manifest_filename = str(manifest_filename or "manifest.toml")
 
         self._resume_schema: Optional[Dict[str, Any]] = None
         if self.schema_validation_enabled and self.resume_schema_path:
@@ -191,237 +326,342 @@ class ResumeProcessor:
             "Found %d new/modified resumes to process.", len(resumes_to_process)
         )
 
-        for resume in resumes_to_process:
-            filepath = resume["filepath"]
-            content = resume["content"]
-            file_hash = resume["hash"]
+        # Parallelize across resumes (AI calls are I/O bound) when configured.
+        # Important: StateManager writes the full state file, so we only update state
+        # on the main thread after workers finish to avoid concurrent file writes.
+        def _process_one(resume_entry: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+            filepath = resume_entry["filepath"]
+            content = resume_entry["content"]
+            file_hash = resume_entry["hash"]
 
             logger.info("Processing resume: %s", filepath)
 
+            # Use a dedicated OutputGenerator per worker to avoid shared "bundle timestamp" state.
+            local_output_generator = OutputGenerator(
+                output_folder=self.output_folder,
+                structured_output_format=self.output_generator.structured_output_format,
+                output_subdir_pattern=self.output_generator.output_subdir_pattern,
+            )
+
             last_structured_path: Optional[str] = None
-            try:
-                for version_idx in range(1, self.num_versions_per_job + 1):
-                    logger.info(
-                        "Enhancing resume '%s' (job=%s version=%d/%d)",
-                        filepath,
-                        job_description_name or "none",
-                        version_idx,
-                        self.num_versions_per_job,
-                    )
+            for version_idx in range(1, self.num_versions_per_job + 1):
+                logger.info(
+                    "Enhancing resume '%s' (job=%s version=%d/%d)",
+                    filepath,
+                    job_description_name or "none",
+                    version_idx,
+                    self.num_versions_per_job,
+                )
 
-                    enhanced_resume_json = self.gemini_integrator.enhance_resume(
-                        content, job_description=job_description_content
-                    )
-                    logger.info(
-                        "Resume '%s' enhanced by Gemini (version %d).",
-                        filepath,
-                        version_idx,
-                    )
+                enhanced_resume_json = self.gemini_integrator.enhance_resume(
+                    content, job_description=job_description_content
+                )
+                logger.info(
+                    "Resume '%s' enhanced by Gemini (version %d).",
+                    filepath,
+                    version_idx,
+                )
 
-                    # Optional schema validation (best-effort). If enabled and a schema is loaded,
-                    # validate and retry a limited number of times by asking the model to fix the schema.
-                    if (
-                        self.schema_validation_enabled
-                        and self._resume_schema is not None
-                    ):
-                        attempts = 0
-                        while True:
-                            result = validate_json_str(
-                                enhanced_resume_json,
-                                self._resume_schema,
-                                instance_name="enhanced_resume",
-                                max_errors=20,
-                            )
-                            if result.ok:
-                                break
+                # Optional schema validation (best-effort). If enabled and a schema is loaded,
+                # validate and retry a limited number of times by asking the model to fix the schema.
+                if self.schema_validation_enabled and self._resume_schema is not None:
+                    attempts = 0
+                    while True:
+                        result = validate_json_str(
+                            enhanced_resume_json,
+                            self._resume_schema,
+                            instance_name="enhanced_resume",
+                            max_errors=20,
+                        )
+                        if result.ok:
+                            break
 
-                            attempts += 1
-                            if attempts > max(0, self.schema_validation_max_retries):
-                                raise ValueError(
-                                    "Enhanced resume failed schema validation:\n"
-                                    + (result.detail or "\n".join(result.errors))
-                                )
-
-                            logger.warning(
-                                "Schema validation failed (attempt %d/%d). Asking model to correct schema. Summary=%s",
-                                attempts,
-                                self.schema_validation_max_retries,
-                                result.summary,
+                        attempts += 1
+                        if attempts > max(0, self.schema_validation_max_retries):
+                            raise ValueError(
+                                "Enhanced resume failed schema validation:\n"
+                                + (result.detail or "\n".join(result.errors))
                             )
 
-                            enhanced_resume_json = self.gemini_integrator.revise_resume(
-                                enhanced_resume_json=enhanced_resume_json,
-                                job_description=job_description_content,
-                                goals=[
-                                    "Fix the JSON schema to match the required structure exactly",
-                                    "Do not add markdown fences",
-                                    "Preserve all existing information; only restructure/normalize fields as needed",
-                                ],
-                            )
+                        logger.warning(
+                            "Schema validation failed (attempt %d/%d). Asking model to correct schema. Summary=%s",
+                            attempts,
+                            self.schema_validation_max_retries,
+                            result.summary,
+                        )
 
-                    # Optional iterative improvement loop
-                    if self.iterate_until_score_reached:
-                        iter_result = self._iterate_until_target(
+                        enhanced_resume_json = self.gemini_integrator.revise_resume(
                             enhanced_resume_json=enhanced_resume_json,
-                            job_description_name=job_description_name,
-                            job_description_content=job_description_content,
-                        )
-                        enhanced_resume_json = iter_result.best_resume_json
-                        logger.info(
-                            "Iteration complete (version %d): best_score=%.2f stopped_reason=%s",
-                            version_idx,
-                            iter_result.best_score,
-                            iter_result.stopped_reason,
+                            job_description=job_description_content,
+                            goals=[
+                                "Fix the JSON schema to match the required structure exactly",
+                                "Do not add markdown fences",
+                                "Preserve all existing information; only restructure/normalize fields as needed",
+                            ],
                         )
 
-                    # Compute scores, display them, and embed them into the resume JSON so they are
-                    # written into the structured output and included in the TXT output.
-                    iteration_score, score_details = self._score_for_iteration(
-                        resume_json=enhanced_resume_json,
+                # Optional iterative improvement loop
+                iteration_result: Optional[IterationResult] = None
+                if self.iterate_until_score_reached:
+                    iteration_result = self._iterate_until_target(
+                        enhanced_resume_json=enhanced_resume_json,
                         job_description_name=job_description_name,
                         job_description_content=job_description_content,
                     )
+                    enhanced_resume_json = iteration_result.best_resume_json
+                    logger.info(
+                        "Iteration complete (version %d): best_score=%.2f stopped_reason=%s",
+                        version_idx,
+                        iteration_result.best_score,
+                        iteration_result.stopped_reason,
+                    )
 
-                    # Display scores (best-effort, avoids crashing on unexpected shapes)
-                    try:
-                        mode = (
-                            score_details.get("mode")
-                            if isinstance(score_details, dict)
-                            else None
-                        )
-                        resume_total = None
-                        match_total = None
+                # Compute scores, display them, and embed TOML-friendly scoring into the resume JSON
+                iteration_score, score_details = self._score_for_iteration(
+                    resume_json=enhanced_resume_json,
+                    job_description_name=job_description_name,
+                    job_description_content=job_description_content,
+                )
 
-                        if isinstance(score_details, dict) and isinstance(
-                            score_details.get("resume_report"), dict
-                        ):
-                            resume_total = score_details["resume_report"].get("total")
+                # Display scores (best-effort)
+                try:
+                    mode = (
+                        score_details.get("mode")
+                        if isinstance(score_details, dict)
+                        else None
+                    )
+                    resume_total = (
+                        score_details.get("resume_total")
+                        if isinstance(score_details, dict)
+                        else None
+                    )
+                    match_total = (
+                        score_details.get("match_total")
+                        if isinstance(score_details, dict)
+                        else None
+                    )
 
-                        if isinstance(score_details, dict) and isinstance(
-                            score_details.get("match_report"), dict
-                        ):
-                            match_total = score_details["match_report"].get("total")
-
-                        if mode == "resume_only":
-                            logger.info(
-                                "Scores (version %d): overall=%.2f resume=%s",
-                                version_idx,
-                                float(iteration_score),
-                                resume_total,
-                            )
-                        else:
-                            logger.info(
-                                "Scores (version %d): overall=%.2f resume=%s match=%s",
-                                version_idx,
-                                float(iteration_score),
-                                resume_total,
-                                match_total,
-                            )
-                    except Exception:
+                    if mode == "resume_only":
                         logger.info(
-                            "Scores (version %d): overall=%.2f",
+                            "Scores (version %d): overall=%.2f resume=%s",
                             version_idx,
                             float(iteration_score),
+                            resume_total,
                         )
-
-                    # Embed scoring into the JSON under `_scoring`
-                    try:
-                        resume_obj = json.loads(enhanced_resume_json)
-                        if isinstance(resume_obj, dict):
-                            scoring_blob: Dict[str, Any] = {
-                                "iteration_score": float(iteration_score),
-                                **(
-                                    score_details
-                                    if isinstance(score_details, dict)
-                                    else {}
-                                ),
-                            }
-
-                            # Optional heuristic recommendations (deterministic; no API calls)
-                            if self.recommendations_enabled:
-                                try:
-                                    recs = generate_recommendations(
-                                        scoring_payload=scoring_blob,
-                                        max_items=self.recommendations_max_items,
-                                    )
-                                    scoring_blob["recommendations"] = recs
-                                except Exception as e:
-                                    logger.warning(
-                                        "Failed to generate recommendations: %s", e
-                                    )
-
-                            resume_obj["_scoring"] = scoring_blob
-                            enhanced_resume_json = json.dumps(
-                                resume_obj, ensure_ascii=False, indent=2
-                            )
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to embed scoring metadata into resume JSON: %s", e
+                    else:
+                        logger.info(
+                            "Scores (version %d): overall=%.2f resume=%s match=%s",
+                            version_idx,
+                            float(iteration_score),
+                            resume_total,
+                            match_total,
                         )
-
-                    # Structured output (TOML/JSON/BOTH depending on OutputGenerator config)
-                    last_structured_path = (
-                        self.output_generator.generate_structured_output(
-                            enhanced_resume_json, filepath, job_title_for_filename
-                        )
-                    )
+                except Exception:
                     logger.info(
-                        "Generated structured output for '%s' at: %s",
-                        filepath,
-                        last_structured_path,
+                        "Scores (version %d): overall=%.2f",
+                        version_idx,
+                        float(iteration_score),
                     )
 
-                    # Optional: write a separate score summary file alongside outputs.
-                    if self.write_score_summary_file and last_structured_path:
-                        try:
-                            resume_obj = json.loads(enhanced_resume_json)
-                            scoring_blob = (
-                                resume_obj.get("_scoring")
-                                if isinstance(resume_obj, dict)
-                                else None
-                            )
-                            if isinstance(scoring_blob, dict):
-                                out_dir = os.path.dirname(last_structured_path)
-                                base = os.path.splitext(os.path.basename(filepath))[0]
-                                score_filename = (
-                                    f"{base}_{job_title_for_filename}_scores.json"
-                                )
-                                score_path = os.path.join(out_dir, score_filename)
-                                with open(score_path, "w", encoding="utf-8") as f:
-                                    json.dump(
-                                        scoring_blob, f, indent=2, ensure_ascii=False
-                                    )
-                                logger.info(
-                                    "Wrote score summary file for '%s' at: %s",
-                                    filepath,
-                                    score_path,
-                                )
-                        except Exception as e:
-                            logger.warning(
-                                "Failed to write score summary file for '%s': %s",
-                                filepath,
-                                e,
-                            )
+                # Embed scoring (TOML-safe) into the resume JSON under `_scoring`
+                scoring_blob: Dict[str, Any] = {
+                    "iteration_score": float(iteration_score),
+                }
+                if isinstance(score_details, dict):
+                    scoring_blob.update(score_details)
 
-                    # Human-readable text output
-                    text_output_path = self.output_generator.generate_text_output(
+                # Optional heuristic recommendations (deterministic; no API calls)
+                if self.recommendations_enabled:
+                    try:
+                        recs = generate_recommendations(
+                            scoring_payload=scoring_blob,
+                            max_items=self.recommendations_max_items,
+                        )
+                        scoring_blob["recommendations"] = recs
+                    except Exception as e:
+                        logger.warning("Failed to generate recommendations: %s", e)
+
+                # Attach iteration metadata if we have it (TOML-safe)
+                if iteration_result is not None:
+                    scoring_blob["iteration"] = {
+                        "stopped_reason": iteration_result.stopped_reason,
+                        "best_score": float(iteration_result.best_score),
+                    }
+
+                try:
+                    resume_obj = json.loads(enhanced_resume_json)
+                    if isinstance(resume_obj, dict):
+                        # Avoid TOML-incompatible structures (list-of-dicts) by keeping this minimal.
+                        resume_obj["_scoring"] = _sanitize_for_toml(scoring_blob) or {
+                            "iteration_score": float(iteration_score)
+                        }
+                        enhanced_resume_json = json.dumps(
+                            resume_obj, ensure_ascii=False, indent=2
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to embed scoring metadata into resume JSON: %s", e
+                    )
+
+                # Structured output (TOML/JSON/BOTH depending on OutputGenerator config)
+                last_structured_path = (
+                    local_output_generator.generate_structured_output(
                         enhanced_resume_json, filepath, job_title_for_filename
                     )
-                    logger.info(
-                        "Generated text output for '%s' at: %s",
-                        filepath,
-                        text_output_path,
-                    )
+                )
+                logger.info(
+                    "Generated structured output for '%s' at: %s",
+                    filepath,
+                    last_structured_path,
+                )
 
-                if last_structured_path:
+                # Human-readable text output
+                text_output_path = local_output_generator.generate_text_output(
+                    enhanced_resume_json, filepath, job_title_for_filename
+                )
+                logger.info(
+                    "Generated text output for '%s' at: %s",
+                    filepath,
+                    text_output_path,
+                )
+
+                out_dir = (
+                    os.path.dirname(last_structured_path)
+                    if last_structured_path
+                    else None
+                )
+
+                # Score summary (TOML)
+                score_summary_path: Optional[str] = None
+                if self.write_score_summary_file and out_dir and toml_io is not None:
+                    try:
+                        score_summary_path = os.path.join(
+                            out_dir, self.score_summary_filename
+                        )
+                        toml_io.dump(
+                            _sanitize_for_toml(scoring_blob) or {}, score_summary_path
+                        )
+                        logger.info(
+                            "Wrote score summary file for '%s' at: %s",
+                            filepath,
+                            score_summary_path,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to write score summary TOML for '%s': %s",
+                            filepath,
+                            e,
+                        )
+
+                # Manifest (TOML)
+                if self.write_manifest_file and out_dir and toml_io is not None:
+                    try:
+                        manifest_path = os.path.join(out_dir, self.manifest_filename)
+                        base = os.path.splitext(os.path.basename(filepath))[0]
+                        manifest: Dict[str, Any] = {
+                            "meta": {
+                                "resume_filename": os.path.basename(filepath),
+                                "resume_basename": base,
+                                "job_description_name": job_description_name or "",
+                                "job_title": job_title_for_filename,
+                                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                                "version_index": int(version_idx),
+                            },
+                            "outputs": {
+                                "structured_output_path": last_structured_path or "",
+                                "text_output_path": text_output_path or "",
+                                "score_summary_path": score_summary_path or "",
+                            },
+                            "scoring": _sanitize_for_toml(scoring_blob) or {},
+                            "processing": {
+                                "iterate_until_score_reached": bool(
+                                    self.iterate_until_score_reached
+                                ),
+                                "target_score": float(self.target_score),
+                                "max_iterations": int(self.max_iterations),
+                                "min_score_delta": float(self.min_score_delta),
+                                "iteration_strategy": str(self.iteration_strategy),
+                                "iteration_patience": int(self.iteration_patience),
+                                "stop_on_regression": bool(self.stop_on_regression),
+                                "max_regressions": int(self.max_regressions),
+                                "schema_validation_enabled": bool(
+                                    self.schema_validation_enabled
+                                ),
+                                "recommendations_enabled": bool(
+                                    self.recommendations_enabled
+                                ),
+                            },
+                        }
+                        toml_io.dump(_sanitize_for_toml(manifest) or {}, manifest_path)
+                        logger.info(
+                            "Wrote manifest file for '%s' at: %s",
+                            filepath,
+                            manifest_path,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to write manifest TOML for '%s': %s", filepath, e
+                        )
+
+            return file_hash, last_structured_path
+
+        # Decide sequential vs parallel execution
+        results: List[Tuple[str, Optional[str]]] = []
+
+        if self.max_concurrent_requests <= 1 or len(resumes_to_process) <= 1:
+            for resume in resumes_to_process:
+                try:
+                    results.append(_process_one(resume))
+                except Exception as e:
+                    logger.error(
+                        "Failed to process resume '%s': %s",
+                        resume.get("filepath"),
+                        e,
+                        exc_info=True,
+                    )
+                    # Even on failure, track the file_hash so we can mark it as attempted
+                    file_hash = resume.get("hash")
+                    if file_hash:
+                        results.append((file_hash, None))
+        else:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.max_concurrent_requests
+            ) as executor:
+                # Map futures to resume entries so we can track which resume failed
+                future_to_resume = {
+                    executor.submit(_process_one, r): r for r in resumes_to_process
+                }
+                for fut in concurrent.futures.as_completed(future_to_resume):
+                    resume = future_to_resume[fut]
+                    try:
+                        results.append(fut.result())
+                    except Exception as e:
+                        logger.error(
+                            "Failed to process resume '%s' in parallel worker: %s",
+                            resume.get("filepath"),
+                            e,
+                            exc_info=True,
+                        )
+                        # Even on failure, track the file_hash so we can mark it as attempted
+                        file_hash = resume.get("hash")
+                        if file_hash:
+                            results.append((file_hash, None))
+
+        # Update StateManager sequentially (avoid concurrent state file writes)
+        for file_hash, last_structured_path in results:
+            if last_structured_path:
+                try:
                     self.state_manager.update_resume_state(
                         file_hash, last_structured_path
                     )
-                    logger.info("State updated for '%s'.", filepath)
-            except Exception as e:
-                logger.error(
-                    "Failed to process resume '%s': %s", filepath, e, exc_info=True
-                )
+                except Exception as e:
+                    logger.error(
+                        "Failed to update state for hash %s -> %s: %s",
+                        file_hash,
+                        last_structured_path,
+                        e,
+                        exc_info=True,
+                    )
 
     # -------------------------
     # Iteration + scoring
@@ -554,6 +794,18 @@ class ResumeProcessor:
         - With a job description: combine resume quality + resume↔job match via `compute_iteration_score`.
         - Without a job description: use resume quality score only.
         """
+        # Score caching (performance): cache by hash of resume JSON + job description content.
+        cache_key = None
+        if self.score_cache_enabled:
+            h = hashlib.sha256()
+            h.update((resume_json or "").encode("utf-8", errors="ignore"))
+            h.update(b"\n||JD||\n")
+            h.update((job_description_content or "").encode("utf-8", errors="ignore"))
+            cache_key = h.hexdigest()
+            cached = self._score_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
         resume = json.loads(resume_json)
         if not isinstance(resume, dict):
             raise ValueError("Enhanced resume must be a JSON object")
@@ -563,11 +815,21 @@ class ResumeProcessor:
         )
 
         if not job_description_content:
-            # No JD => optimize resume quality only
-            return float(resume_report.total), {
-                "mode": "resume_only",
-                "resume_report": resume_report.as_dict(),
-            }
+            # No JD => optimize resume quality only.
+            # Include full resume report in TOML-friendly form (categories as tables).
+            resume_report_toml = _score_report_to_toml(resume_report.as_dict())
+
+            result = (
+                float(resume_report.total),
+                {
+                    "mode": "resume_only",
+                    "resume_total": float(resume_report.total),
+                    "resume_report": resume_report_toml,
+                },
+            )
+            if cache_key is not None:
+                self._score_cache[cache_key] = result
+            return result
 
         job = self._job_dict_from_description(
             job_description_name=job_description_name,
@@ -583,12 +845,69 @@ class ResumeProcessor:
             weights_toml_path=self.scoring_weights_file,
         )
 
-        return float(iteration_score), {
-            "mode": "resume_plus_match",
-            "resume_report": resume_report.as_dict(),
-            "match_report": match_report.as_dict(),
-            "combined": combine_details,
-        }
+        # Extract keyword samples for usability (TOML-friendly; lists of strings)
+        matched_keywords: List[str] = []
+        missing_keywords: List[str] = []
+        try:
+            mr = match_report.as_dict()
+            cats = mr.get("categories")
+            if isinstance(cats, list):
+                for c in cats:
+                    if not isinstance(c, dict):
+                        continue
+                    if c.get("name") != "keyword_overlap":
+                        continue
+                    details = c.get("details")
+                    if isinstance(details, dict):
+                        overlap = details.get("sample_overlap")
+                        missing = details.get("sample_missing")
+                        if isinstance(overlap, list):
+                            matched_keywords = [
+                                str(x) for x in overlap if isinstance(x, str)
+                            ]
+                        if isinstance(missing, list):
+                            missing_keywords = [
+                                str(x) for x in missing if isinstance(x, str)
+                            ]
+                    break
+        except Exception:
+            pass
+
+        # Full reports in TOML-friendly form (categories as tables)
+        resume_report_toml = _score_report_to_toml(resume_report.as_dict())
+        match_report_toml = _score_report_to_toml(match_report.as_dict())
+
+        # Job report is useful context, even though iteration_score combines resume+match.
+        try:
+            job_report = score_job(job, weights_toml_path=self.scoring_weights_file)
+            job_report_toml = _score_report_to_toml(job_report.as_dict())
+            job_total = float(job_report.total)
+        except Exception:
+            job_report_toml = {}
+            job_total = None
+
+        result = (
+            float(iteration_score),
+            {
+                "mode": "resume_plus_match",
+                "resume_total": float(resume_report.total),
+                "match_total": float(match_report.total),
+                "job_total": job_total,
+                "resume_report": resume_report_toml,
+                "match_report": match_report_toml,
+                "job_report": job_report_toml,
+                "combined": _sanitize_for_toml(combine_details) or {},
+                "keywords": {
+                    "matched": matched_keywords[:20],
+                    "missing": missing_keywords[:20],
+                },
+            },
+        )
+
+        if cache_key is not None:
+            self._score_cache[cache_key] = result
+
+        return result
 
     # -------------------------
     # Helpers

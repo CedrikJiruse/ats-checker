@@ -132,7 +132,7 @@ class StateManager:
 
     def _save_state(self) -> None:
         """
-        Saves the current state to TOML.
+        Saves the current state to TOML using atomic writes.
         """
         try:
             os.makedirs(
@@ -143,7 +143,11 @@ class StateManager:
             pass
 
         try:
-            self._write_toml_state(self.state_filepath, self.state)
+            # Use atomic write pattern: write to temp file, then rename
+            temp_file = self.state_filepath + ".tmp"
+            self._write_toml_state(temp_file, self.state)
+            # os.replace is atomic on both POSIX and Windows
+            os.replace(temp_file, self.state_filepath)
             logger.debug("State saved to %s", self.state_filepath)
         except Exception as e:
             logger.error(
