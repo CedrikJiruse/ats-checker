@@ -1,0 +1,48 @@
+# Budget Preset: Minimal Cost (Free or $0.50-1 per 100 resumes)
+# Optimized for: Cost-conscious users, personal use, development/testing
+# Trade-offs: Lower quality output, rate limits on free tiers
+# Good for: Testing, learning, batch processing with time flexibility
+
+[profile]
+name = "Budget"
+description = "Free or nearly free - prioritizes cost over quality"
+
+[ai]
+provider = "gemini"
+model_name = "gemini-1.5-flash-latest"
+
+[ai.agents.enhancer]
+role = "resume_enhancement"
+provider = "gemini"
+model_name = "gemini-1.5-flash-latest"
+temperature = 0.7
+max_output_tokens = 4096
+
+[ai.agents.job_summarizer]
+role = "job_summary"
+provider = "gemini"
+model_name = "gemini-1.5-flash-latest"
+temperature = 0.5
+max_output_tokens = 2048
+
+[ai.agents.scorer]
+role = "scoring"
+provider = "groq"
+model_name = "meta-llama/Llama-3.3-70B-Instruct"
+temperature = 0.3
+max_output_tokens = 2048
+
+[ai.agents.reviser]
+role = "resume_revision"
+provider = "gemini"
+model_name = "gemini-1.5-flash-latest"
+temperature = 0.8
+max_output_tokens = 4096
+
+[notes]
+cost_per_100_resumes = "FREE (with Gemini free tier) or $0.50-1.00 (paid)"
+monthly_budget = "$0-10"
+speed = "Medium (Gemini Flash is moderately fast)"
+quality = "Good for basic tasks, adequate for most use cases"
+api_keys_required = ["GEMINI_API_KEY", "GROQ_API_KEY (optional, Groq is free)"]
+best_for = "Students, personal projects, testing, cost-conscious professionals"

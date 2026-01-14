@@ -1,0 +1,35 @@
+# Anthropic Provider Profile
+# All agents use Anthropic Claude models
+# Focus on quality and reasoning capability
+
+[ai]
+provider = "anthropic"
+model_name = "claude-3-5-sonnet-20241022"  # Default
+
+[ai.agents.enhancer]
+role = "resume_enhancement"
+provider = "anthropic"
+model_name = "claude-3-5-sonnet-20241022"  # Best quality for structural enhancement
+temperature = 0.7
+max_output_tokens = 4096
+
+[ai.agents.job_summarizer]
+role = "job_summary"
+provider = "anthropic"
+model_name = "claude-3-5-haiku-20241022"  # Fast and efficient for summarization
+temperature = 0.5
+max_output_tokens = 2048
+
+[ai.agents.scorer]
+role = "scoring"
+provider = "anthropic"
+model_name = "claude-3-5-haiku-20241022"  # Fast for scoring
+temperature = 0.3
+max_output_tokens = 1024
+
+[ai.agents.reviser]
+role = "resume_revision"
+provider = "anthropic"
+model_name = "claude-3-5-sonnet-20241022"  # Strong reasoning for iterative improvement
+temperature = 0.8
+max_output_tokens = 4096

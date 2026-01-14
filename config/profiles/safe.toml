@@ -1,0 +1,58 @@
+# Safe profile (stability + correctness)
+#
+# How to use:
+# - Copy these settings into your main config or have your loader overlay this file.
+# - This profile prioritizes correctness, explainability, and avoiding runaway iterations.
+#
+# Notes:
+# - This file assumes your base config already defines [paths] and [ai] sections.
+# - All values here are under [processing] because they are behavior knobs.
+
+[processing]
+# Generate only one version by default to keep outputs focused and predictable.
+num_versions_per_job = 1
+
+# Iterative improvement: enabled but conservative.
+iterate_until_score_reached = false
+target_score = 80.0
+max_iterations = 3
+min_score_delta = 0.25
+
+# Iteration strategy: stable stopping behavior.
+iteration_strategy = "patience"
+iteration_patience = 2
+stop_on_regression = true
+max_regressions = 1
+
+# Concurrency: keep low to avoid rate limiting and reduce nondeterministic ordering.
+max_concurrent_requests = 1
+
+# Score cache: enable to speed up iterations without changing results.
+score_cache_enabled = true
+
+# Schema validation: enable to avoid writing malformed structured outputs.
+schema_validation_enabled = true
+# If you ship a schema at this path, keep it; otherwise change it to an existing file.
+resume_schema_path = "config/resume_schema.json"
+schema_validation_max_retries = 1
+
+# Recommendations: enable but keep output small.
+recommendations_enabled = true
+recommendations_max_items = 5
+
+# Outputs: prefer TOML for readability.
+structured_output_format = "toml"
+
+# Output folder structure: keep organized per resume/job/timestamp.
+output_subdir_pattern = "{resume_name}/{job_title}/{timestamp}"
+
+# Extra artifacts: helpful for debugging and review.
+write_manifest_file = true
+manifest_filename = "manifest.toml"
+
+write_score_summary_file = true
+score_summary_filename = "scores.toml"
+
+# Profiles support (optional; used by a loader overlay step)
+profiles_folder = "config/profiles"
+default_profile = "safe.toml"

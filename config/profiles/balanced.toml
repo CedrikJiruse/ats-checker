@@ -1,0 +1,54 @@
+# Balanced Preset: Cost + Quality (Recommended - $5-10 per 100 resumes)
+# Optimized for: Most users - excellent balance of quality, cost, and speed
+# Trade-offs: Small cost per resume, but high return on investment
+# Good for: Job seekers, career changers, serious resume optimization
+
+[profile]
+name = "Balanced"
+description = "Best value - high quality with reasonable cost"
+
+[ai]
+provider = "openai"
+model_name = "gpt-4o-mini"
+
+[ai.agents.enhancer]
+role = "resume_enhancement"
+provider = "openai"
+model_name = "gpt-4o-mini"
+temperature = 0.7
+max_output_tokens = 4096
+
+[ai.agents.job_summarizer]
+role = "job_summary"
+provider = "openai"
+model_name = "gpt-4o-mini"
+temperature = 0.5
+max_output_tokens = 2048
+
+[ai.agents.scorer]
+role = "scoring"
+provider = "groq"
+model_name = "meta-llama/Llama-3.3-70B-Instruct"
+temperature = 0.3
+max_output_tokens = 2048
+
+[ai.agents.reviser]
+role = "resume_revision"
+provider = "openai"
+model_name = "gpt-4o-mini"
+temperature = 0.8
+max_output_tokens = 4096
+
+[notes]
+cost_per_100_resumes = "$5-10"
+monthly_budget = "$20-50"
+speed = "Fast (GPT-4o-mini is optimized for speed)"
+quality = "Excellent - competitive with Claude Haiku, better than Gemini"
+api_keys_required = ["OPENAI_API_KEY", "GROQ_API_KEY (free)"]
+best_for = "Most users - job seekers, career changers, serious optimization"
+recommendations = [
+  "Start here if you're unsure",
+  "Best ROI - small cost for significant quality improvement",
+  "Groq scoring is FREE, so only pay for enhancement/revision",
+  "Upgrade to 'Quality' preset if you need highest quality"
+]

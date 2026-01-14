@@ -1,0 +1,57 @@
+# Aggressive profile (speed + stronger tailoring)
+#
+# How to use:
+# - Copy these settings into your main config or have your loader overlay this file.
+# - This profile prioritizes: faster throughput, more iterations, and stronger resume↔job alignment.
+#
+# Notes:
+# - This file assumes your base config already defines [paths] and [ai] sections.
+# - All values here are under [processing] because they are behavior knobs.
+
+[processing]
+# Generate multiple versions (useful for A/B testing different phrasing strategies).
+num_versions_per_job = 2
+
+# Iterative improvement: enabled and more persistent.
+iterate_until_score_reached = true
+target_score = 85.0
+max_iterations = 6
+min_score_delta = 0.10
+
+# Iteration strategy: keep going until patience runs out; tolerate a couple regressions.
+iteration_strategy = "patience"
+iteration_patience = 3
+stop_on_regression = true
+max_regressions = 2
+
+# Concurrency: higher throughput (be mindful of provider rate limits).
+max_concurrent_requests = 3
+
+# Score cache: keep enabled so iterations and multi-version runs are faster.
+score_cache_enabled = true
+
+# Schema validation: keep enabled (avoid wasting iterations on malformed structure).
+schema_validation_enabled = true
+resume_schema_path = "config/resume_schema.json"
+schema_validation_max_retries = 2
+
+# Recommendations: enabled and slightly more verbose for rapid iteration.
+recommendations_enabled = true
+recommendations_max_items = 10
+
+# Outputs: TOML preferred for readability.
+structured_output_format = "toml"
+
+# Output folder structure: organized per resume/job/timestamp.
+output_subdir_pattern = "{resume_name}/{job_title}/{timestamp}"
+
+# Extra artifacts: keep manifests + score summaries for review.
+write_manifest_file = true
+manifest_filename = "manifest.toml"
+
+write_score_summary_file = true
+score_summary_filename = "scores.toml"
+
+# Profiles support (optional; used by a loader overlay step)
+profiles_folder = "config/profiles"
+default_profile = "aggressive.toml"

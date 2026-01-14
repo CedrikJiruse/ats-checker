@@ -277,11 +277,43 @@ class GeminiAgent:
 def create_agent(config: AgentConfig) -> Agent:
     """
     Create an agent implementation for the configured provider.
+
+    Supported providers:
+    - gemini: Google Gemini (requires GEMINI_API_KEY)
+    - openai: OpenAI GPT models (requires OPENAI_API_KEY)
+    - anthropic: Anthropic Claude models (requires ANTHROPIC_API_KEY)
+    - llama: Meta Llama via Together AI/Groq (requires TOGETHER_API_KEY or GROQ_API_KEY)
     """
     provider = (config.provider or "").lower().strip()
+
     if provider == "gemini":
         return GeminiAgent(config)
-    raise AgentConfigError(f"Unknown agent provider: {config.provider!r}")
+    elif provider == "openai":
+        try:
+            from providers.openai_agent import OpenAIAgent
+
+            return OpenAIAgent(config)
+        except Exception as e:
+            raise AgentConfigError(f"Failed to create OpenAI agent: {e}") from e
+    elif provider == "anthropic":
+        try:
+            from providers.anthropic_agent import AnthropicAgent
+
+            return AnthropicAgent(config)
+        except Exception as e:
+            raise AgentConfigError(f"Failed to create Anthropic agent: {e}") from e
+    elif provider == "llama":
+        try:
+            from providers.llama_agent import LlamaAgent
+
+            return LlamaAgent(config)
+        except Exception as e:
+            raise AgentConfigError(f"Failed to create Llama agent: {e}") from e
+
+    raise AgentConfigError(
+        f"Unknown agent provider: {config.provider!r}. "
+        "Supported: gemini, openai, anthropic, llama"
+    )
 
 
 class AgentRegistry:

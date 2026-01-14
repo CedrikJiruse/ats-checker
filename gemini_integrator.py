@@ -41,6 +41,11 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from agents import Agent, AgentRegistry
+from prompts.prompt_library import (
+    ResumeEnhancementPrompt,
+    JobSummaryPrompt,
+    RevisionPrompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,53 +160,26 @@ class GeminiAPIIntegrator:
         self, resume_content: str, job_description: Optional[str] = None
     ) -> str:
         """
-        Craft prompt for resume enhancement to structured JSON.
+        Craft prompt for resume enhancement to structured JSON using modern best practices.
         """
-        prompt_parts = [
-            "You are an expert resume builder. Your task is to take the provided resume content "
-            "and enhance it for clarity, impact, and professional presentation. "
-            "Focus on action verbs, quantifiable achievements, and industry-standard formatting. "
-            "The output should be a well-structured JSON object representing the enhanced resume. "
-            "The JSON should have the following top-level keys: 'personal_info', 'summary', 'experience', 'education', 'skills', 'projects'. "
-            "Each section should be an array of objects or a single object as appropriate. "
-            "For example, 'personal_info' should be an object with keys like 'name', 'email', 'phone', 'linkedin', 'github', 'portfolio'. "
-            "The 'experience', 'education', and 'projects' sections should be arrays of objects, each with relevant details. "
-            "The 'skills' section should be an array of strings. "
-        ]
-
-        if job_description:
-            prompt_parts.append(
-                "Crucially, tailor the resume specifically to the following job description. "
-                "Highlight relevant skills and experiences, and rephrase accomplishments "
-                "to align with the requirements and keywords in the job description. "
-                "Here is the job description:\n\n"
-                f"{job_description}\n\n"
-            )
-
-        prompt_parts.append(
-            "Here is the raw resume content:\n"
-            f"{resume_content}\n\n"
-            "The output MUST be a raw JSON object, with no markdown formatting (e.g., no ```json around it) or conversational filler."
+        prompt_template = ResumeEnhancementPrompt()
+        agent = self._get_agent("enhancer")
+        return prompt_template.render(
+            provider=agent.config.provider,
+            resume_content=resume_content,
+            job_description=job_description,
         )
-
-        return "".join(prompt_parts)
 
     def _craft_job_summary_prompt(self, job_description: str) -> str:
         """
-        Prompt that produces a compact, actionable job summary.
-        Output is plain text (not JSON) for easy display.
+        Prompt that produces a compact, actionable job summary using modern best practices.
+        Output is plain text (not JSON) for easy display and ATS optimization.
         """
-        return (
-            "You are an expert technical recruiter.\n"
-            "Summarize the following job description in a compact, actionable way.\n\n"
-            "Return ONLY plain text with the following sections:\n"
-            "1) One-line role summary\n"
-            "2) Top responsibilities (5 bullets)\n"
-            "3) Must-have requirements (5 bullets)\n"
-            "4) Nice-to-haves (3 bullets)\n"
-            "5) Keywords to mirror in a resume (comma-separated)\n\n"
-            "Job description:\n"
-            f"{job_description}\n"
+        prompt_template = JobSummaryPrompt()
+        agent = self._get_agent("job_summarizer")
+        return prompt_template.render(
+            provider=agent.config.provider,
+            job_description=job_description,
         )
 
     def _craft_revision_prompt(
@@ -209,37 +187,32 @@ class GeminiAPIIntegrator:
         enhanced_resume_json: str,
         job_description: Optional[str] = None,
         goals: Optional[List[str]] = None,
+        current_score: float = 0.0,
+        target_score: float = 80.0,
+        focus_areas: Optional[str] = None,
     ) -> str:
         """
-        Prompt for iterative revision of an already-structured resume JSON.
+        Prompt for iterative revision of an already-structured resume JSON using modern best practices.
         The model is required to output raw JSON only.
         """
-        goals = goals or [
-            "Improve ATS keyword alignment without lying",
-            "Increase quantified impact where possible (keep truthful phrasing)",
-            "Keep formatting consistent and concise",
-        ]
+        prompt_template = RevisionPrompt()
+        agent = self._get_agent("reviser")
 
-        parts = [
-            "You are an expert ATS resume editor.\n"
-            "You will be given a JSON resume. Revise it to be stronger.\n"
-            "Rules:\n"
-            "- Do NOT fabricate employers, dates, degrees, or certifications.\n"
-            "- You may rephrase and improve clarity/impact.\n"
-            "- Keep the same JSON schema as the input.\n"
-            "- Output MUST be a raw JSON object only (no markdown fences).\n\n"
-            "Goals:\n"
-        ]
-        for g in goals:
-            parts.append(f"- {g}\n")
+        # Use provided focus areas if available, otherwise generate from goals
+        focus_text = None
+        if focus_areas:
+            focus_text = focus_areas
+        elif goals:
+            focus_text = "\n".join(f"- {g}" for g in goals)
 
-        if job_description:
-            parts.append("\nJob description to tailor to:\n")
-            parts.append(f"{job_description}\n")
-
-        parts.append("\nCurrent resume JSON:\n")
-        parts.append(f"{enhanced_resume_json}\n")
-        return "".join(parts)
+        return prompt_template.render(
+            provider=agent.config.provider,
+            enhanced_resume_json=enhanced_resume_json,
+            current_score=current_score,
+            target_score=target_score,
+            focus_areas=focus_text,
+            job_description=job_description,
+        )
 
     # ----------------------------
     # Public API (backward compatible)
@@ -284,6 +257,9 @@ class GeminiAPIIntegrator:
         enhanced_resume_json: str,
         job_description: Optional[str] = None,
         goals: Optional[List[str]] = None,
+        current_score: float = 0.0,
+        target_score: float = 80.0,
+        focus_areas: Optional[str] = None,
     ) -> str:
         """
         Revise an already-structured resume JSON using the reviser agent.
@@ -291,7 +267,10 @@ class GeminiAPIIntegrator:
         Args:
             enhanced_resume_json: JSON string representing the structured resume.
             job_description: Optional job description content.
-            goals: Optional list of goals to guide revision.
+            goals: Optional list of goals to guide revision (legacy parameter).
+            current_score: Current resume score (for score-aware revision).
+            target_score: Target score for improvement.
+            focus_areas: Specific areas to focus improvement on.
 
         Returns:
             Revised resume JSON string (pretty printed).
@@ -305,6 +284,9 @@ class GeminiAPIIntegrator:
             enhanced_resume_json=json.dumps(base, ensure_ascii=False, indent=2),
             job_description=job_description,
             goals=goals,
+            current_score=current_score,
+            target_score=target_score,
+            focus_areas=focus_areas,
         )
         agent = self._get_agent("reviser")
 
@@ -374,6 +356,9 @@ class GeminiAPIIntegrator:
                 enhanced_resume_json=best_json,
                 job_description=job_description,
                 goals=goals,
+                current_score=best_score,
+                target_score=target_score,
+                focus_areas=None,
             )
             candidate_score = float(score_fn(candidate))
             history.append({"iteration": i, "score": candidate_score})

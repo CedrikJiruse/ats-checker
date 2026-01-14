@@ -1,0 +1,35 @@
+# OpenAI Provider Profile
+# All agents use OpenAI GPT models
+# Cost-optimized for maximum efficiency: GPT-4o for quality, GPT-4o-mini for speed
+
+[ai]
+provider = "openai"
+model_name = "gpt-4o-mini"  # Default (can be overridden per agent)
+
+[ai.agents.enhancer]
+role = "resume_enhancement"
+provider = "openai"
+model_name = "gpt-4o"  # Best quality for resume enhancement
+temperature = 0.7
+max_output_tokens = 4096
+
+[ai.agents.job_summarizer]
+role = "job_summary"
+provider = "openai"
+model_name = "gpt-4o-mini"  # Fast and cheap for summarization
+temperature = 0.5
+max_output_tokens = 2048
+
+[ai.agents.scorer]
+role = "scoring"
+provider = "openai"
+model_name = "gpt-4o-mini"  # Cheap and fast for scoring
+temperature = 0.3
+max_output_tokens = 1024
+
+[ai.agents.reviser]
+role = "resume_revision"
+provider = "openai"
+model_name = "gpt-4o"  # Good quality for iterative improvement
+temperature = 0.8
+max_output_tokens = 4096

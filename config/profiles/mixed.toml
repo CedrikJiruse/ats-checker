@@ -1,0 +1,38 @@
+# Mixed Provider Profile
+# Uses the best model for each task, optimizing cost and quality
+# Recommended for balanced performance and cost-efficiency
+
+[ai]
+provider = "gemini"  # Default fallback
+
+[ai.agents.enhancer]
+role = "resume_enhancement"
+provider = "anthropic"
+model_name = "claude-3-5-sonnet-20241022"
+temperature = 0.7
+max_output_tokens = 4096
+# Anthropic excels at structured output and clear reasoning
+
+[ai.agents.job_summarizer]
+role = "job_summary"
+provider = "openai"
+model_name = "gpt-4o-mini"
+temperature = 0.5
+max_output_tokens = 2048
+# Fast and cheap for straightforward summarization tasks
+
+[ai.agents.scorer]
+role = "scoring"
+provider = "gemini"
+model_name = "gemini-1.5-flash-latest"
+temperature = 0.3
+max_output_tokens = 1024
+# Gemini Flash is very fast and has free tier availability
+
+[ai.agents.reviser]
+role = "resume_revision"
+provider = "openai"
+model_name = "gpt-4o"
+temperature = 0.8
+max_output_tokens = 4096
+# GPT-4o good balance of quality and availability for iteration
