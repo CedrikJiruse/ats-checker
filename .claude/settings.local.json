@@ -12,7 +12,9 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(cargo check:*)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo build:*)"
     ]
   },
   "outputStyle": "default"
