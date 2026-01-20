@@ -4,14 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**ATS Resume Checker** is a Python application that enhances resumes using AI (Gemini API) and scores them against job descriptions. It combines resume optimization, job scraping, and iterative improvement with a comprehensive scoring system.
+**ATS Resume Checker** is a high-performance Rust application that enhances resumes using AI (Gemini, OpenAI, Claude, Llama) and scores them against job descriptions. It combines resume optimization, job scraping, and iterative improvement with a comprehensive scoring system.
+
+> **Note:** This is a Rust rewrite. The original Python implementation is preserved in [`python-original/`](./python-original/) for reference.
 
 ## Core Architecture
 
 ### Main Data Flow
 
 1. **Input**: Raw resumes (TXT, PDF, DOCX, images with OCR support) + optional job descriptions
-2. **Enhancement**: Gemini API restructures resumes into JSON format
+2. **Enhancement**: AI API restructures resumes into JSON format
 3. **Scoring**: Multi-dimensional scoring system for resume quality and job match
 4. **Iteration**: Optional iterative loop to improve scores until target is reached
 5. **Output**: Structured files (TOML/JSON) + human-readable TXT files
@@ -19,36 +21,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Key Modules
 
 **Core Processing Pipeline**
-- `main.py`: Interactive CLI menu + entry point for both menu and batch modes
-- `config.py`: TOML-based configuration management with backward-compatible JSON support, profile overlays
-- `resume_processor.py`: Orchestrates the full pipeline: enhancement → scoring → iteration → output
-- `input_handler.py`: Loads resumes (with OCR support for images), job descriptions, and manages file hashing
-- `state_manager.py`: TOML-backed persistent state tracking to avoid reprocessing
+- `src/bin/main.rs`: CLI entry point with interactive and batch modes
+- `src/config/`: TOML-based configuration management with profile overlays
+- `src/processor/`: Orchestrates the full pipeline: enhancement → scoring → iteration → output
+- `src/input/`: Loads resumes (with OCR support), job descriptions, and manages file hashing
+- `src/state/`: TOML-backed persistent state tracking to avoid reprocessing
 
 **AI Integration**
-- `gemini_integrator.py`: Multi-agent interface to Google Gemini API (enhancement, revision, summarization)
+- `src/agents/`: Multi-provider agent abstraction (Gemini, OpenAI, Claude, Llama)
+- `src/gemini/`: Google Gemini API client implementation
 
 **Output & Artifacts**
-- `output_generator.py`: Generates TXT, JSON, and TOML output files with configurable layout patterns
-- `scoring.py`: Multi-category scoring system (resume quality + job match scoring)
-- `recommendations.py`: Generates actionable improvement suggestions from scores
+- `src/output/`: Generates TXT, JSON, and TOML output files
+- `src/scoring/`: Multi-category scoring system (resume quality + job match scoring)
+- `src/recommendations/`: Generates actionable improvement suggestions from scores
 
 **Job Search & Scraping**
-- `job_scraper_manager.py`: Unified interface for job scraping across multiple sites
-- `job_scraper_base.py`: Data structures (JobPosting, SearchFilters)
-- `saved_search_manager.py`: Persistence layer for saved searches
+- `src/scraper/`: Job scraping across multiple sites (LinkedIn, Indeed, Glassdoor, etc.)
+  - `types.rs`: JobPosting, SearchFilters, SavedSearch data structures
+  - `manager.rs`: Unified scraping interface
 
 **Utilities**
-- `utils.py`: File hashing, text extraction, validation helpers
-- `schema_validation.py`: JSON schema validation with best-effort retry
+- `src/utils/`: File hashing, text extraction, validation helpers
+- `src/validation/`: JSON schema validation with retry logic
+- `src/error.rs`: Comprehensive error types with 30+ variants
 
 ## Configuration
 
-Configuration uses **TOML as primary format** (default: `config/config.toml`). Legacy JSON configs are auto-migrated.
+Configuration uses **TOML format** (default: `config/config.toml`).
 
 ### Key Configuration Areas
 
-**Processing Settings** (`config.py` defaults section):
+**Processing Settings**:
 - Resume enhancement versions per job: `num_versions_per_job`
 - Iterative improvement: `iterate_until_score_reached`, `target_score`, `max_iterations`, `iteration_strategy` (best_of/first_hit/patience)
 - Output format: `structured_output_format` (json/toml/both)
@@ -64,7 +68,7 @@ Configuration uses **TOML as primary format** (default: `config/config.toml`). L
 - `scoring_weights_file`: Weights for scoring categories
 
 **Multi-Agent Configuration**:
-Defined in `ai.agents` section as nested tables with role, provider, model_name for: enhancer, job_summarizer, scorer, reviser.
+Defined in `[ai.agents.*]` sections with role, provider, model_name for: enhancer, job_summarizer, scorer, reviser.
 
 ### Profile Overlays
 
@@ -82,120 +86,136 @@ Profiles are loaded before the main config, allowing preset configurations.
 
 ```bash
 # With default config (config/config.toml)
-python main.py
+cargo run --release
 
 # With custom config
-python main.py --config_file path/to/config.toml
+cargo run --release -- --config path/to/config.toml
 ```
 
-The menu provides:
-1. Process resumes (all/with job description/specific resume)
-2. Convert files to standard format
-3. Job search & scraping
-4. View/edit settings
-5. View available files
-6. View generated outputs
-7. Test OCR functionality
-
-### Batch Mode (Legacy CLI)
-
-```bash
-# Process resumes tailored to a specific job description
-python main.py --config_file config/config.toml --job_description "job_title.txt"
-```
-
-### Specialized CLI Subcommands
+### CLI Subcommands
 
 ```bash
 # Score a single resume
-python main.py score-resume --resume path/to/resume.json --weights config/scoring_weights.toml
+cargo run --release -- score-resume --resume path/to/resume.toml --weights config/scoring_weights.toml
 
 # Score resume-job match
-python main.py score-match --resume path/to/resume.json --job path/to/job.json --weights config/scoring_weights.toml
+cargo run --release -- score-match --resume path/to/resume.toml --job path/to/job.txt --weights config/scoring_weights.toml
 
 # Rank jobs by score
-python main.py rank-jobs --results path/to/results.json --weights config/scoring_weights.toml
+cargo run --release -- rank-jobs --results path/to/results.toml --weights config/scoring_weights.toml --top 20
 ```
 
-See `cli_commands.py` for implementation.
+See `src/cli/mod.rs` for implementation.
 
 ## Testing
 
 ### Running Tests
 
 ```bash
-# Run all tests with pytest (recommended)
-python -m pytest -q
+# Run all tests
+cargo test
 
-# Run specific test class
-python -m pytest tests/test_job_scrapers.py::TestJobSpyScraperIsRemote -v
+# Run specific test
+cargo test test_job_posting_creation
 
-# Run single test
-python -m pytest tests/test_job_scrapers.py::TestJobSpyScraperIsRemote::test_remote_only_true_passes_is_remote -v
+# Run with output
+cargo test -- --nocapture
 
-# Run with unittest (alternative)
-python -m unittest tests.test_job_scrapers -v
+# Run with logging
+RUST_LOG=debug cargo test
 ```
 
 ### Test Coverage
 
-- `tests/test_job_scrapers.py`: Job scraping, data validation, JobSpy integration
-- `tests/test_resume_processor.py`: Resume processing orchestration
-- `tests/test_output_generator.py`: Output generation (TXT/JSON/TOML)
-- `tests/test_state_manager.py`: State persistence
-- `tests/test_config_profiles.py`: Config & profile loading
-- `tests/test_resume_processor_artifacts.py`: Artifacts (manifest, scores)
-- `tests/test_resume_processor_score_cache.py`: Score caching
-
-**Known Issue**: When `python-jobspy` is installed, it pulls heavy dependencies (numpy/pandas). Unit tests use mocks to avoid importing these during test discovery.
+Currently being developed. Tests will cover:
+- `tests/test_scoring.rs`: Scoring algorithms
+- `tests/test_config.rs`: Configuration loading
+- `tests/test_state.rs`: State persistence
+- `tests/test_scraper.rs`: Job scraping
+- Integration tests for full pipeline
 
 ## Code Organization
 
-### Directory Structure (Key Files)
+### Directory Structure
 
 ```
 ats-checker/
-├── main.py                          # Interactive menu + batch entry point
-├── config.py                        # Configuration management
-├── resume_processor.py              # Main processing pipeline
-├── gemini_integrator.py             # AI agent integration
-├── output_generator.py              # Output generation (TXT/JSON/TOML)
-├── scoring.py                       # Resume + job match scoring
-├── job_scraper_manager.py           # Job scraping interface
-├── input_handler.py                 # Resume/job input + OCR
-├── state_manager.py                 # State tracking (TOML-backed)
-├── utils.py                         # Utility functions
-├── cli_commands.py                  # Specialized CLI subcommands
+├── src/
+│   ├── lib.rs                   # Library entry point
+│   ├── bin/main.rs              # CLI binary
+│   ├── error.rs                 # Error types (30+ variants)
+│   ├── config/                  # Configuration management
+│   │   └── mod.rs              # Config struct with TOML loading
+│   ├── state/                   # State persistence
+│   │   └── mod.rs              # StateManager with atomic writes
+│   ├── agents/                  # LLM agent abstraction
+│   │   ├── mod.rs              # Agent trait
+│   │   └── registry.rs         # Multi-provider registry
+│   ├── scoring/                 # Scoring algorithms
+│   │   ├── mod.rs              # Main scoring functions
+│   │   ├── resume.rs           # Resume quality scoring
+│   │   ├── job.rs              # Job posting scoring
+│   │   └── match.rs            # Resume-job match scoring
+│   ├── scraper/                 # Job scraping
+│   │   ├── mod.rs
+│   │   ├── types.rs            # JobPosting, SearchFilters
+│   │   └── manager.rs          # Scraping interface
+│   ├── processor/               # Resume processing pipeline
+│   ├── input/                   # Input handling
+│   ├── output/                  # Output generation
+│   ├── recommendations/         # Improvement suggestions
+│   ├── validation/              # Schema validation
+│   ├── utils/                   # Utilities
+│   │   ├── hash.rs             # SHA256 file hashing
+│   │   └── text.rs             # Text extraction
+│   ├── gemini/                  # Gemini API client
+│   ├── toml_io/                 # TOML I/O utilities
+│   └── cli/                     # CLI interface
 ├── config/
-│   ├── config.toml                  # Main configuration (TOML)
-│   ├── scoring_weights.toml         # Scoring category weights
+│   ├── config.toml              # Main configuration (TOML)
+│   ├── scoring_weights.toml     # Scoring category weights
 │   └── profiles/
-│       ├── safe.toml                # Conservative profile
-│       └── aggressive.toml          # Aggressive profile
+│       ├── safe.toml            # Conservative profile
+│       └── aggressive.toml      # Aggressive profile
 ├── workspace/
-│   ├── input_resumes/               # User-provided resumes
-│   ├── job_descriptions/            # Job descriptions for tailoring
-│   ├── output/                      # Generated outputs
-│   └── job_search_results/          # Saved job search results
+│   ├── input_resumes/           # User-provided resumes
+│   ├── job_descriptions/        # Job descriptions for tailoring
+│   ├── output/                  # Generated outputs
+│   └── job_search_results/      # Saved job search results
 ├── data/
 │   ├── processed_resumes_state.toml # Resume processing state
-│   └── saved_searches.toml          # Saved job search configurations
-└── tests/                           # Comprehensive test suite
+│   └── saved_searches.toml      # Saved job search configurations
+├── tests/                       # Test suite
+├── python-original/             # Original Python implementation
+├── Cargo.toml                   # Rust dependencies
+└── RUST_REWRITE_TODO.md        # Rewrite progress checklist (1600+ items)
 ```
 
 ## Important Implementation Details
 
+### Error Handling
+
+All errors use the `AtsError` enum defined in `src/error.rs` with 30+ variants:
+- Configuration errors (ConfigNotFound, ConfigParse, ConfigValidation)
+- I/O errors (Io, FileNotFound, PermissionDenied)
+- API errors (ApiRequest, ApiResponse, ApiAuth, ApiRateLimit)
+- Scoring errors (Scoring, ScoringWeights)
+- State errors (StateCorrupted, StateOperation)
+
+The `Result<T>` type alias is `std::result::Result<T, AtsError>`.
+
 ### State Management
 
-**StateManager** (`state_manager.py`) tracks processed resumes by content hash to avoid reprocessing:
+**StateManager** (`src/state/mod.rs`) tracks processed resumes by content hash:
 - Stores mapping: `file_hash` → `output_path` in TOML
-- Called after each resume is successfully processed
+- Uses atomic file writes (write to .tmp, then rename)
 - Enables resuming interrupted runs
+- Auto-migrates from legacy JSON format
 
 ### Resume Processing Workflow
 
-1. **Input**: Scan folder for new/modified resumes (via hash comparison)
-2. **Enhancement**: Send to Gemini to restructure into JSON format
+1. **Input**: Scan folder for new/modified resumes (via SHA256 hash comparison)
+2. **Enhancement**: Send to AI to restructure into JSON format
 3. **Schema Validation** (optional): Validate output, retry if needed
 4. **Iteration** (optional): Revise until target score reached using configured strategy
 5. **Scoring**: Compute resume quality + job match scores
@@ -206,13 +226,16 @@ ats-checker/
 
 ### Scoring System
 
-**Three-tier scoring model**:
+**Three-tier scoring model** (all implemented in `src/scoring/`):
 - **Resume Score**: Evaluates resume quality (structure, keywords, impact)
+  - Categories: completeness, skills_quality, experience_quality, impact
 - **Job Score**: Evaluates job posting quality
-- **Match Score**: Evaluates resume-job alignment (keyword overlap, skill relevance)
+  - Categories: completeness, clarity, compensation_transparency, link_quality
+- **Match Score**: Evaluates resume-job alignment
+  - Categories: keyword_overlap, skills_overlap, role_alignment
 - **Iteration Score**: Combines resume + match scores (weighted)
 
-Each score report includes category breakdowns (e.g., keyword_overlap, skill_alignment) with weights and sample details (matched/missing keywords).
+Each score report includes category breakdowns with weights and sample details.
 
 ### Iteration Strategies
 
@@ -220,13 +243,11 @@ Each score report includes category breakdowns (e.g., keyword_overlap, skill_ali
 - **first_hit**: Stop immediately when target score reached
 - **patience**: Stop if no improvement for N consecutive iterations (more stable)
 
-Regression tracking prevents poor candidates. Optional early stopping on too many regressions.
-
 ### Output File Organization
 
 Pattern configurable via `output_subdir_pattern` (default: `{resume_name}/{job_title}/{timestamp}`).
 
-Example structure for a resume:
+Example structure:
 ```
 output/
 └── John_Doe/
@@ -241,80 +262,46 @@ output/
 
 ### Job Scraping Integration
 
-**Supported sources**: LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter (via JobSpy library).
+**Supported sources**: LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter
 
-SearchFilters support: keywords, location, job_type, remote_only, experience_level, date_posted.
+SearchFilters support: keywords, location, job_type, remote_only, experience_level, date_posted, salary_min
 
 Results saved with optional scoring for ranking by relevance.
-
-## Common Development Tasks
-
-### Running a Single Resume Processing Test
-
-```bash
-# Create a test resume in workspace/input_resumes/
-echo "Your resume content..." > workspace/input_resumes/test_resume.txt
-
-# Run interactively, select option 1 (Process all resumes)
-python main.py
-
-# Or batch mode with job description
-python main.py --job_description "your_job.txt"
-```
-
-### Testing Configuration Changes
-
-```bash
-# Edit config/config.toml, then reload in interactive menu (option 4)
-# Or pass overrides via CLI:
-python main.py --config_file config/config.toml --num_versions_per_job 2 --target_score 75.0
-```
-
-### Debugging Score Issues
-
-```bash
-# Use specialized CLI to score an existing resume
-python main.py score-resume --resume output/path/to/resume.json --weights config/scoring_weights.toml
-```
-
-### Checking Processed State
-
-View `data/processed_resumes_state.toml` to see which resumes have been processed and their output paths.
-
-## TOML Configuration Files
-
-**Primary Config** (`config/config.toml`):
-- Nested sections: `[paths]`, `[ai]`, `[processing]`, `[job_search]`
-- Multi-agent definitions in `[ai.agents.*]`
-- Profile overlay reference: `[profile] file = "..."`
-
-**Scoring Weights** (`config/scoring_weights.toml`):
-- Defines scoring categories and their weights
-- Used by `scoring.py` to compute scores
-- Format: `[scoring_weights]` section with category definitions
-
-**State Files** (TOML-backed):
-- `data/processed_resumes_state.toml`: Maps resume hashes to output paths
-- `data/saved_searches.toml`: Saved job search configurations
-
-**Output Artifacts** (TOML):
-- `manifest.toml`: Metadata about a processing run (resume name, job, timestamp, versions)
-- `scores.toml`: Detailed scoring breakdown in TOML-friendly format
-
-## Performance Considerations
-
-- **Concurrency**: Set `max_concurrent_requests` for parallel resume processing (I/O bound)
-- **Score Caching**: Enable `score_cache_enabled` to avoid recomputing scores during iteration
-- **OCR**: Only triggers on image inputs; optional Tesseract configuration via `tesseract_cmd`
-- **Heavy Dependencies**: JobSpy scraping is optional; tests use mocks to avoid numpy/pandas
 
 ## Development Workflow
 
 1. **Config changes**: Update `config/config.toml` or create a profile in `config/profiles/`
-2. **New scoring categories**: Add to `config/scoring_weights.toml` and update `scoring.py`
-3. **AI prompt tuning**: Modify agent prompts in `gemini_integrator.py`
-4. **Output format changes**: Update `output_generator.py` formatting logic
-5. **New job sources**: Implement in `job_scraper_manager.py` + add to tests
-6. **New features**: Add CLI subcommands in `cli_commands.py`
+2. **New scoring categories**: Add to `config/scoring_weights.toml` and update `src/scoring/`
+3. **AI prompt tuning**: Modify agent prompts in `src/agents/`
+4. **Output format changes**: Update `src/output/` formatting logic
+5. **New job sources**: Implement in `src/scraper/` + add to tests
+6. **Error handling**: Add new variants to `src/error.rs` AtsError enum
 
-Always run `pytest -q` before committing to ensure tests pass.
+Always run `cargo test && cargo clippy` before committing.
+
+## Rust-Specific Notes
+
+- **Async/await**: Uses tokio runtime for async operations
+- **Error handling**: thiserror for error definitions, anyhow for error context
+- **Serialization**: serde for JSON/TOML (de)serialization
+- **Type safety**: Extensive use of Rust's type system to prevent bugs at compile time
+- **Performance**: Zero-copy parsing, efficient hashing, true parallelism
+- **Dependencies**: See `Cargo.toml` for full list (40+ crates)
+
+## Current Status
+
+This is an **active rewrite**. See [RUST_REWRITE_TODO.md](./RUST_REWRITE_TODO.md) for detailed progress (1600+ items across 20 phases).
+
+Completed:
+- ✅ Project structure and build system
+- ✅ Error types and Result aliases
+- ✅ Configuration management with TOML
+- ✅ State management with persistence
+- ✅ Core data structures (JobPosting, SearchFilters, Config)
+
+In Progress:
+- 🚧 Scoring algorithms implementation
+- 🚧 Agent trait and registry system
+- 🚧 Resume processing pipeline
+
+For Python implementation details, see [python-original/README_PYTHON.md](./python-original/README_PYTHON.md).
