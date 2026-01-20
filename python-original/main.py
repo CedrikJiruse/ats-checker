@@ -1507,7 +1507,7 @@ def view_current_configuration(config):
     """Display current AI model configuration"""
     agents = config.ai_agents
     for agent_name, agent_config in agents.items():
-        print(f"  {agent_name}: {agent_config.provider}/{agent_config.model_name}")
+        print(f"  {agent_name}: {agent_config['provider']}/{agent_config['model_name']}")
 
 
 def change_agent_model(config, config_file_path):
@@ -1520,7 +1520,7 @@ def change_agent_model(config, config_file_path):
     print("Select agent to modify:")
     for i, agent_name in enumerate(agent_names, 1):
         current = agents[agent_name]
-        print(f"{i}. {agent_name} (current: {current.provider}/{current.model_name})")
+        print(f"{i}. {agent_name} (current: {current['provider']}/{current['model_name']})")
 
     choice = input(f"\nEnter choice (1-{len(agent_names)}): ").strip()
 
@@ -1662,15 +1662,18 @@ def load_provider_profile(config, config_file_path):
 
     # Load profile config
     try:
-        from config import load_config_from_file
-        profile_config = load_config_from_file(profile_path)
+        import tomllib
+        with open(profile_path, "rb") as f:
+            profile_data = tomllib.load(f)
 
-        # Merge profile AI agents into current config
-        if hasattr(profile_config, 'ai_agents'):
-            config.ai_agents = profile_config.ai_agents
-            config.save_config(config_file_path)
+        # Extract ai.agents from profile
+        ai_agents = profile_data.get("ai", {}).get("agents", {})
+        if ai_agents:
+            config.ai_agents = ai_agents
+            from config import save_config_toml
+            save_config_toml(config, config_file_path)
             print("\n" + "=" * 60)
-            print(f"✓ Successfully loaded {profile_name} preset!")
+            print(f"Successfully loaded {profile_name} preset!")
             print("=" * 60)
             print(f"\nCost: {profile_info['cost']}")
             print(f"Quality: {profile_info['quality']}")
@@ -1694,8 +1697,8 @@ def test_ai_configuration(config):
     all_ok = True
 
     for agent_name, agent_config in agents.items():
-        provider = agent_config.provider
-        model_name = agent_config.model_name
+        provider = agent_config['provider']
+        model_name = agent_config['model_name']
 
         # Map provider to environment variable
         env_vars = {

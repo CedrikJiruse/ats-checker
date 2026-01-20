@@ -1,186 +1,107 @@
-# ATS Checker configuration (TOML)
-#
-# This file replaces the legacy `config.json`.
-#
-# Notes:
-# - Most paths can be relative; the app will normalize them to absolute paths.
-# - `tesseract_cmd` is optional. Use "" (empty string) to mean "unset".
-# - Scoring weights are stored in a separate TOML file (see paths.scoring_weights_file).
-# - Multi-agent settings live under [ai.agents.*].
-
-[paths]
-output_folder = "workspace/output"
-input_resumes_folder = "workspace/input_resumes"
-job_descriptions_folder = "workspace/job_descriptions"
-job_search_results_folder = "workspace/job_search_results"
-
-# State and saved searches (TOML)
-state_file = "data/processed_resumes_state.toml"
-saved_searches_file = "data/saved_searches.toml"
-
-# OCR
-tesseract_cmd = ""
-
-# Scoring
-scoring_weights_file = "config/scoring_weights.toml"
-
-
 [ai]
-# Supported providers: "gemini", "openai", "anthropic", "llama"
-provider = "gemini"
-
-# Default model settings (used unless an agent overrides them)
-model_name = "gemini-1.5-flash-latest"
-temperature = 0.7
-top_p = 0.95
-top_k = 40
 max_output_tokens = 8192
-
-# Environment variable names for API key authentication
-# Configure these environment variables based on your chosen providers:
-# - GEMINI_API_KEY: Google Gemini API (get at https://makersuite.google.com/app/apikey)
-# - OPENAI_API_KEY: OpenAI API (get at https://platform.openai.com/api-keys)
-# - ANTHROPIC_API_KEY: Anthropic API (get at https://console.anthropic.com/account/keys)
-# - TOGETHER_API_KEY: Together AI for Llama (get at https://www.together.ai/signin)
-# - GROQ_API_KEY: Groq for Llama (get at https://console.groq.com/keys)
-
-[ai.api_keys]
-gemini_env_var = "GEMINI_API_KEY"
-openai_env_var = "OPENAI_API_KEY"
-anthropic_env_var = "ANTHROPIC_API_KEY"
-together_env_var = "TOGETHER_API_KEY"
-groq_env_var = "GROQ_API_KEY"
-
-# Multi-agent configuration.
-# Each agent may override provider/model_name/temperature/top_p/top_k/max_output_tokens.
-# You can mix providers: different agents can use different AI platforms for optimization.
-
-[ai.agents.enhancer]
-role = "resume_enhancement"
-provider = "gemini"
 model_name = "gemini-1.5-flash-latest"
+provider = "gemini"
+temperature = 0.7
+top_k = 40
+top_p = 0.95
+
+[ai.agents]
+[ai.agents.enhancer]
+max_output_tokens = 4096
+model_name = "gemini-1.5-flash-latest"
+provider = "gemini"
+role = "resume_enhancement"
+temperature = 0.7
 
 [ai.agents.job_summarizer]
+max_output_tokens = 2048
+model_name = "gemini-1.5-flash-latest"
+provider = "gemini"
 role = "job_summary"
-provider = "gemini"
-model_name = "gemini-1.5-flash-latest"
-
-[ai.agents.scorer]
-role = "scoring"
-provider = "gemini"
-model_name = "gemini-1.5-flash-latest"
+temperature = 0.5
 
 [ai.agents.reviser]
-role = "resume_revision"
-provider = "gemini"
+max_output_tokens = 4096
 model_name = "gemini-1.5-flash-latest"
+provider = "gemini"
+role = "resume_revision"
+temperature = 0.8
 
-
-[processing]
-# How many versions to generate per job description
-num_versions_per_job = 1
-
-# Iterative improvement loop (revise until target score reached)
-iterate_until_score_reached = false
-target_score = 80.0
-max_iterations = 3
-min_score_delta = 0.1
-
-# Iteration strategy (advanced)
-# - "best_of": keep best candidate seen so far; stop on target/no_progress/max_iterations
-# - "first_hit": stop immediately once target_score is reached
-# - "patience": stop if no improvement is seen for N iterations (best overall for stability)
-iteration_strategy = "patience"
-iteration_patience = 2
-stop_on_regression = true
-max_regressions = 2
-
-# Performance (batch processing)
-# Limit concurrent processing requests (Gemini calls are I/O bound; threads help).
-max_concurrent_requests = 2
-
-# Output artifacts
-# Always prefer TOML for readability (TOML/JSON structured output is controlled below).
-write_manifest_file = true
-manifest_filename = "manifest.toml"
-
-# Also write a separate score summary file alongside outputs (TOML for readability).
-write_score_summary_file = true
-score_summary_filename = "scores.toml"
-
-# Structured output format for enhanced resume data:
-# - "json": JSON only
-# - "toml": TOML preferred (fallback to JSON if TOML write fails)
-# - "both": write both TOML and JSON
-structured_output_format = "toml"
-
-# Schema validation (optional)
-# If enabled, the app may validate the AI-produced structured resume output and retry once
-# (depending on processing.schema_validation_max_retries).
-schema_validation_enabled = false
-resume_schema_path = "config/resume_schema.json"
-schema_validation_max_retries = 1
-
-# Recommendations (optional)
-# If enabled, the app may generate actionable recommendations from score breakdowns
-# and attach them into the structured output under `_scoring.recommendations`.
-recommendations_enabled = false
-recommendations_max_items = 5
-
-# Output layout
-# Controls how outputs are organized under `paths.output_folder`.
-# Available placeholders:
-# - {resume_name}  (filename without extension)
-# - {job_title}    (job description filename without extension, or "generic")
-# - {timestamp}    (YYYYMMDD_HHMMSS)
-output_subdir_pattern = "{resume_name}/{job_title}/{timestamp}"
-
-
-# Profiles (optional)
-# These are intended to let you switch between different behavior presets without editing many fields.
-# The application can load the selected profile and overlay it on top of this file.
-[profile]
-# Profile selection for behavior presets.
-# - name: informational label
-# - file: optional profile TOML to overlay on top of this config
-name = "safe"
-file = "config/profiles/safe.toml"
+[ai.agents.scorer]
+max_output_tokens = 2048
+model_name = "meta-llama/Llama-3.3-70B-Instruct"
+provider = "groq"
+role = "scoring"
+temperature = 0.3
 
 [job_search]
 max_job_results_per_search = 50
 
-# Global default filters applied to all job searches
-# Leave empty strings or empty arrays for no default
 [job_search.defaults]
-location = "Dublin, Ireland"
+date_posted = ""
+experience_level = []
+job_type = []
 keywords = ""
+location = "Dublin, Ireland"
 remote_only = false
-date_posted = ""           # "24h", "week", "month", or empty for any
-job_type = []              # ["Full-time", "Part-time", "Contract", "Internship"]
-experience_level = []      # ["Entry", "Mid", "Senior", "Director", "Executive"]
 
-# JobSpy-specific settings (applies to all JobSpy-based scrapers)
 [job_search.jobspy]
 country_indeed = "Ireland"
 
-# Portal configuration - enable/disable and customize display names
-# To add a new portal, add a new section with enabled, display_name
-[job_search.portals.linkedin]
-enabled = true
-display_name = "LinkedIn"
-
-[job_search.portals.indeed]
-enabled = true
-display_name = "Indeed"
-
+[job_search.portals]
 [job_search.portals.glassdoor]
-enabled = true
 display_name = "Glassdoor"
+enabled = true
 
 [job_search.portals.google]
-enabled = true
 display_name = "Google Jobs"
+enabled = true
+
+[job_search.portals.indeed]
+display_name = "Indeed"
+enabled = true
+
+[job_search.portals.linkedin]
+display_name = "LinkedIn"
+enabled = true
 
 [job_search.portals.ziprecruiter]
-enabled = true
 display_name = "ZipRecruiter"
+enabled = true
+
+[paths]
+input_resumes_folder = "C:\\Users\\gemas\\Projects\\ats-checker\\workspace\\input_resumes"
+job_descriptions_folder = "C:\\Users\\gemas\\Projects\\ats-checker\\workspace\\job_descriptions"
+job_search_results_folder = "C:\\Users\\gemas\\Projects\\ats-checker\\workspace\\job_search_results"
+output_folder = "C:\\Users\\gemas\\Projects\\ats-checker\\workspace\\output"
+saved_searches_file = "C:\\Users\\gemas\\Projects\\ats-checker\\data\\saved_searches.toml"
+scoring_weights_file = "C:\\Users\\gemas\\Projects\\ats-checker\\config\\scoring_weights.toml"
+state_file = "C:\\Users\\gemas\\Projects\\ats-checker\\data\\processed_resumes_state.toml"
+tesseract_cmd = ""
+
+[processing]
+default_profile = "safe.toml"
+iterate_until_score_reached = false
+iteration_patience = 2
+iteration_strategy = "patience"
+manifest_filename = "manifest.toml"
+max_concurrent_requests = 2
+max_iterations = 3
+max_regressions = 2
+min_score_delta = 0.1
+num_versions_per_job = 1
+output_subdir_pattern = "{resume_name}/{job_title}/{timestamp}"
+profiles_folder = "config/profiles"
+recommendations_enabled = false
+recommendations_max_items = 5
+resume_schema_path = "config/resume_schema.json"
+schema_validation_enabled = false
+schema_validation_max_retries = 1
+score_cache_enabled = true
+score_summary_filename = "scores.toml"
+stop_on_regression = true
+structured_output_format = "toml"
+target_score = 80.0
+write_manifest_file = true
+write_score_summary_file = true

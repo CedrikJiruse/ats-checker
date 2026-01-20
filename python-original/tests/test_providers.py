@@ -44,7 +44,7 @@ class TestOpenAIAgent:
     def test_agent_initializes_with_api_key(self, config):
         """Test that agent initializes successfully with API key."""
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            with patch("providers.openai_agent.OpenAI"):
+            with patch("openai.OpenAI"):
                 from providers.openai_agent import OpenAIAgent
                 agent = OpenAIAgent(config)
                 assert agent.config == config
@@ -52,7 +52,7 @@ class TestOpenAIAgent:
     def test_generate_text_with_valid_response(self, config):
         """Test text generation with valid response."""
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            with patch("providers.openai_agent.OpenAI") as mock_openai:
+            with patch("openai.OpenAI") as mock_openai:
                 # Mock the API response
                 mock_client = MagicMock()
                 mock_openai.return_value = mock_client
@@ -71,7 +71,7 @@ class TestOpenAIAgent:
     def test_generate_text_requires_non_empty_prompt(self, config):
         """Test that generate_text requires non-empty prompt."""
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            with patch("providers.openai_agent.OpenAI"):
+            with patch("openai.OpenAI"):
                 from providers.openai_agent import OpenAIAgent
                 agent = OpenAIAgent(config)
 
@@ -81,7 +81,7 @@ class TestOpenAIAgent:
     def test_generate_json_with_valid_json(self, config):
         """Test JSON generation with valid JSON response."""
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            with patch("providers.openai_agent.OpenAI") as mock_openai:
+            with patch("openai.OpenAI") as mock_openai:
                 mock_client = MagicMock()
                 mock_openai.return_value = mock_client
 
@@ -101,7 +101,7 @@ class TestOpenAIAgent:
     def test_generate_json_strips_markdown_fences(self, config):
         """Test that generate_json strips markdown fences."""
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            with patch("providers.openai_agent.OpenAI") as mock_openai:
+            with patch("openai.OpenAI") as mock_openai:
                 mock_client = MagicMock()
                 mock_openai.return_value = mock_client
 
@@ -130,7 +130,7 @@ class TestOpenAIAgent:
         )
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            with patch("providers.openai_agent.OpenAI") as mock_openai:
+            with patch("openai.OpenAI") as mock_openai:
                 with patch("providers.openai_agent.time.sleep"):
                     mock_client = MagicMock()
                     mock_openai.return_value = mock_client
@@ -337,7 +337,7 @@ class TestProviderErrorHandling:
         config = AgentConfig(name="test", provider="openai", max_retries=2)
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            with patch("providers.openai_agent.OpenAI") as mock_openai:
+            with patch("openai.OpenAI") as mock_openai:
                 with patch("providers.openai_agent.time.sleep"):
                     mock_client = MagicMock()
                     mock_openai.return_value = mock_client
@@ -381,7 +381,7 @@ class TestProviderErrorHandling:
         config = AgentConfig(name="test", provider="openai")
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-            with patch("providers.openai_agent.OpenAI") as mock_openai:
+            with patch("openai.OpenAI") as mock_openai:
                 mock_client = MagicMock()
                 mock_openai.return_value = mock_client
 

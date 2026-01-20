@@ -10,7 +10,9 @@
       "Bash(grep:*)",
       "Bash(python3 -m py_compile:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(cargo check:*)",
+      "Bash(git mv:*)"
     ]
   },
   "outputStyle": "default"

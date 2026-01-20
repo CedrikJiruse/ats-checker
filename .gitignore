@@ -1,11 +1,43 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Project specific
 output/
 input_resumes/
 job_descriptions/
 job_search_results/
-venv/
-__pycache__/
-.vscode/
-.pytest_cache/
-WARP.md
 workspace/
 data/processed_resumes_state.toml
+WARP.md
+
+# Claude
+.claude/
