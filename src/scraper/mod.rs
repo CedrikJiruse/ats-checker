@@ -31,13 +31,13 @@
 //! }
 //! ```
 
-mod types;
 mod manager;
 mod saved_search;
+mod types;
 
-pub use types::{JobPosting, SearchFilters, SavedSearch, JobSource};
 pub use manager::JobScraperManager;
 pub use saved_search::SavedSearchManager;
+pub use types::{JobPosting, JobSource, SavedSearch, SearchFilters};
 
 use crate::error::Result;
 use async_trait::async_trait;

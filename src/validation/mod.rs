@@ -1,7 +1,7 @@
 //! JSON schema validation module.
 
-use serde::{Deserialize, Serialize};
 use crate::error::Result;
+use serde::{Deserialize, Serialize};
 
 /// Validation result.
 #[derive(Debug, Clone, Serialize, Deserialize)]

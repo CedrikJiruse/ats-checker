@@ -1,7 +1,7 @@
 //! Text extraction from various file formats.
 
-use std::path::Path;
 use crate::error::{AtsError, Result};
+use std::path::Path;
 
 /// Extract text from a file (TXT, PDF, DOCX, etc.).
 pub fn extract_text_from_file(path: impl AsRef<Path>) -> Result<String> {

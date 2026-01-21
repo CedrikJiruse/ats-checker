@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{AtsError, Result};
-use crate::scraper::{JobPosting, SearchFilters, JobScraper};
+use crate::scraper::{JobPosting, JobScraper, SearchFilters};
 
 /// Manages job scraping across multiple sources.
 ///
@@ -128,13 +128,14 @@ impl JobScraperManager {
             }
             _ => {
                 // Default to TOML
-                let wrapper = ResultsWrapper { jobs: results.to_vec() };
-                let toml_str = toml::to_string_pretty(&wrapper).map_err(|e| {
-                    AtsError::TomlParse {
+                let wrapper = ResultsWrapper {
+                    jobs: results.to_vec(),
+                };
+                let toml_str =
+                    toml::to_string_pretty(&wrapper).map_err(|e| AtsError::TomlParse {
                         message: e.to_string(),
                         source: None,
-                    }
-                })?;
+                    })?;
                 std::fs::write(&path, toml_str)?;
             }
         }
@@ -184,7 +185,9 @@ impl JobScraperManager {
         jobs.sort_by(|a, b| {
             let score_a = a.job_score.unwrap_or(0.0);
             let score_b = b.job_score.unwrap_or(0.0);
-            score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+            score_b
+                .partial_cmp(&score_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // Take top N and add ranks
@@ -223,8 +226,12 @@ impl JobScraperManager {
         let mut count = 0;
         for job in jobs {
             // Create safe filename
-            let safe_title = job.title.replace(|c: char| !c.is_alphanumeric() && c != ' ', "");
-            let safe_company = job.company.replace(|c: char| !c.is_alphanumeric() && c != ' ', "");
+            let safe_title = job
+                .title
+                .replace(|c: char| !c.is_alphanumeric() && c != ' ', "");
+            let safe_company = job
+                .company
+                .replace(|c: char| !c.is_alphanumeric() && c != ' ', "");
             let filename = format!("{}_{}.txt", safe_title, safe_company)
                 .replace("  ", " ")
                 .replace(' ', "_");
@@ -293,10 +300,9 @@ mod tests {
     #[test]
     fn test_save_and_load_results() {
         let dir = tempdir().unwrap();
-        let manager = JobScraperManager::new(
-            dir.path().join("results"),
-            dir.path().join("saved.toml"),
-        ).unwrap();
+        let manager =
+            JobScraperManager::new(dir.path().join("results"), dir.path().join("saved.toml"))
+                .unwrap();
 
         let jobs = vec![
             JobPosting::new("Engineer", "Co", "SF", "Desc", "url1", "linkedin"),
@@ -313,10 +319,9 @@ mod tests {
     #[test]
     fn test_rank_jobs() {
         let dir = tempdir().unwrap();
-        let manager = JobScraperManager::new(
-            dir.path().join("results"),
-            dir.path().join("saved.toml"),
-        ).unwrap();
+        let manager =
+            JobScraperManager::new(dir.path().join("results"), dir.path().join("saved.toml"))
+                .unwrap();
 
         let jobs = vec![
             JobPosting::new("A", "Co", "SF", "Desc", "url1", "src").with_score(50.0),

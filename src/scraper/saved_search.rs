@@ -26,7 +26,10 @@ impl SavedSearchManager {
             HashMap::new()
         };
 
-        Ok(Self { file_path, searches })
+        Ok(Self {
+            file_path,
+            searches,
+        })
     }
 
     /// Save a search configuration.
@@ -86,11 +89,9 @@ impl SavedSearchManager {
             searches: self.searches.clone(),
         };
 
-        let toml_str = toml::to_string_pretty(&wrapper).map_err(|e| {
-            AtsError::TomlParse {
-                message: e.to_string(),
-                source: None,
-            }
+        let toml_str = toml::to_string_pretty(&wrapper).map_err(|e| AtsError::TomlParse {
+            message: e.to_string(),
+            source: None,
         })?;
 
         // Atomic write

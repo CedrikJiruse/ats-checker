@@ -439,9 +439,7 @@ impl AtsError {
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            Self::ApiRateLimit { .. }
-                | Self::ApiTimeout { .. }
-                | Self::Network { .. }
+            Self::ApiRateLimit { .. } | Self::ApiTimeout { .. } | Self::Network { .. }
         )
     }
 

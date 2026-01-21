@@ -54,30 +54,31 @@
 #![allow(clippy::must_use_candidate)]
 
 // Public modules
+pub mod agents;
+pub mod cli;
 pub mod config;
 pub mod error;
-pub mod state;
-pub mod utils;
-pub mod scoring;
-pub mod agents;
-pub mod scraper;
+pub mod gemini;
 pub mod input;
 pub mod output;
 pub mod processor;
 pub mod recommendations;
-pub mod validation;
-pub mod gemini;
+pub mod scoring;
+pub mod scraper;
+pub mod state;
 pub mod toml_io;
-pub mod cli;
+pub mod utils;
+pub mod validation;
 
 // Re-exports for convenience
 pub use config::Config;
 pub use error::{AtsError, Result};
-pub use state::StateManager;
-pub use scoring::{ScoreReport, score_resume, score_job, score_match};
-pub use scraper::{JobPosting, SearchFilters, JobScraperManager};
+pub use output::{OutputData, OutputGenerator, OutputManifest};
 pub use processor::ResumeProcessor;
 pub use recommendations::Recommendation;
+pub use scoring::{score_job, score_match, score_resume, ScoreReport};
+pub use scraper::{JobPosting, JobScraperManager, SearchFilters};
+pub use state::StateManager;
 pub use validation::ValidationResult;
 
 /// Library version
@@ -96,9 +97,9 @@ pub mod prelude {
 
     pub use crate::config::Config;
     pub use crate::error::{AtsError, Result};
-    pub use crate::state::StateManager;
-    pub use crate::scoring::{ScoreReport, score_resume, score_job, score_match};
-    pub use crate::scraper::{JobPosting, SearchFilters};
     pub use crate::processor::ResumeProcessor;
     pub use crate::recommendations::Recommendation;
+    pub use crate::scoring::{score_job, score_match, score_resume, ScoreReport};
+    pub use crate::scraper::{JobPosting, SearchFilters};
+    pub use crate::state::StateManager;
 }

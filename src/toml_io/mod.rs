@@ -1,7 +1,7 @@
 //! TOML I/O module.
 
-use std::path::Path;
 use crate::error::Result;
+use std::path::Path;
 
 /// Load TOML from a file.
 pub fn load(path: impl AsRef<Path>) -> Result<serde_json::Value> {
@@ -26,11 +26,9 @@ pub fn dump(data: &serde_json::Value, path: impl AsRef<Path>) -> Result<()> {
 /// Serialize TOML to a string.
 pub fn dumps(data: &serde_json::Value) -> Result<String> {
     let toml_value: toml::Value = serde_json::from_value(data.clone())?;
-    let s = toml::to_string_pretty(&toml_value).map_err(|e| {
-        crate::error::AtsError::TomlParse {
-            message: e.to_string(),
-            source: None,
-        }
+    let s = toml::to_string_pretty(&toml_value).map_err(|e| crate::error::AtsError::TomlParse {
+        message: e.to_string(),
+        source: None,
     })?;
     Ok(s)
 }

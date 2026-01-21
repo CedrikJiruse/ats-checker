@@ -118,11 +118,9 @@ impl StateManager {
             resumes: self.state.clone(),
         };
 
-        let toml_str = toml::to_string_pretty(&wrapper).map_err(|e| {
-            AtsError::TomlParse {
-                message: e.to_string(),
-                source: None,
-            }
+        let toml_str = toml::to_string_pretty(&wrapper).map_err(|e| AtsError::TomlParse {
+            message: e.to_string(),
+            source: None,
         })?;
 
         // Atomic write
@@ -161,7 +159,9 @@ mod tests {
         let path = dir.path().join("state.toml");
 
         let mut manager = StateManager::new(&path).unwrap();
-        manager.update_resume_state("abc123", "output/file.txt").unwrap();
+        manager
+            .update_resume_state("abc123", "output/file.txt")
+            .unwrap();
 
         assert!(manager.is_processed("abc123"));
         let state = manager.get_resume_state("abc123").unwrap();

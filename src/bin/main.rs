@@ -1,7 +1,7 @@
 //! ATS Resume Checker - Main binary.
 
+use ats_checker::{cli::Cli, Config};
 use clap::Parser;
-use ats_checker::{Config, cli::Cli};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,7 +28,11 @@ async fn main() -> anyhow::Result<()> {
                 println!("Using weights: {}", w);
             }
         }
-        Some(ats_checker::cli::Commands::ScoreMatch { resume, job, weights }) => {
+        Some(ats_checker::cli::Commands::ScoreMatch {
+            resume,
+            job,
+            weights,
+        }) => {
             println!("Scoring match: {} vs {}", resume, job);
             if let Some(w) = weights {
                 println!("Using weights: {}", w);

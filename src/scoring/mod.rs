@@ -140,9 +140,7 @@ fn default_overall_iteration_weights() -> HashMap<String, f64> {
 /// [match.weights]
 /// keyword_overlap = 0.45
 /// ```
-pub fn load_scoring_weights(
-    weights_path: Option<&str>,
-) -> HashMap<String, HashMap<String, f64>> {
+pub fn load_scoring_weights(weights_path: Option<&str>) -> HashMap<String, HashMap<String, f64>> {
     let mut all_weights = HashMap::new();
     all_weights.insert("resume".to_string(), default_resume_weights());
     all_weights.insert("job".to_string(), default_job_weights());
@@ -177,7 +175,10 @@ pub fn load_scoring_weights(
 
             let mut parsed = HashMap::new();
             for (key, value) in weights_table {
-                if let Some(weight) = value.as_float().or_else(|| value.as_integer().map(|i| i as f64)) {
+                if let Some(weight) = value
+                    .as_float()
+                    .or_else(|| value.as_integer().map(|i| i as f64))
+                {
                     parsed.insert(key.clone(), weight);
                 }
             }
@@ -222,7 +223,10 @@ pub fn load_overall_iteration_weights(weights_path: Option<&str>) -> HashMap<Str
 
         for key in ["resume", "match"] {
             if let Some(value) = weights_table.get(key) {
-                if let Some(weight) = value.as_float().or_else(|| value.as_integer().map(|i| i as f64)) {
+                if let Some(weight) = value
+                    .as_float()
+                    .or_else(|| value.as_integer().map(|i| i as f64))
+                {
                     weights.insert(key.to_string(), weight);
                 }
             }
@@ -298,10 +302,7 @@ pub fn compute_iteration_score(
 /// Score a resume across multiple quality categories.
 ///
 /// Returns a ScoreReport with weighted total (0-100) and category breakdowns.
-pub fn score_resume(
-    resume: &serde_json::Value,
-    weights_path: Option<&str>,
-) -> Result<ScoreReport> {
+pub fn score_resume(resume: &serde_json::Value, weights_path: Option<&str>) -> Result<ScoreReport> {
     let all_weights = load_scoring_weights(weights_path);
     let resume_weights = all_weights
         .get("resume")
@@ -359,13 +360,31 @@ pub fn score_resume(
     })
 }
 
-fn score_resume_completeness(resume: &serde_json::Value) -> (f64, HashMap<String, serde_json::Value>) {
+fn score_resume_completeness(
+    resume: &serde_json::Value,
+) -> (f64, HashMap<String, serde_json::Value>) {
     let personal = resume.get("personal_info").and_then(|v| v.as_object());
     let summary = resume.get("summary").and_then(|v| v.as_str()).unwrap_or("");
-    let exp = resume.get("experience").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-    let edu = resume.get("education").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-    let skills = resume.get("skills").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-    let projects = resume.get("projects").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+    let exp = resume
+        .get("experience")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let edu = resume
+        .get("education")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let skills = resume
+        .get("skills")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let projects = resume
+        .get("projects")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
 
     let has_name = personal
         .and_then(|p| p.get("name"))
@@ -406,8 +425,14 @@ fn score_resume_completeness(resume: &serde_json::Value) -> (f64, HashMap<String
     details.insert("has_name".to_string(), serde_json::json!(has_name));
     details.insert("has_email".to_string(), serde_json::json!(has_email));
     details.insert("has_summary".to_string(), serde_json::json!(has_summary));
-    details.insert("has_experience".to_string(), serde_json::json!(has_experience));
-    details.insert("has_education".to_string(), serde_json::json!(has_education));
+    details.insert(
+        "has_experience".to_string(),
+        serde_json::json!(has_experience),
+    );
+    details.insert(
+        "has_education".to_string(),
+        serde_json::json!(has_education),
+    );
     details.insert("has_skills".to_string(), serde_json::json!(has_skills));
     details.insert("has_projects".to_string(), serde_json::json!(has_projects));
     details.insert("experience_count".to_string(), serde_json::json!(exp));
@@ -418,7 +443,9 @@ fn score_resume_completeness(resume: &serde_json::Value) -> (f64, HashMap<String
     (clamp(score, 0.0, 100.0), details)
 }
 
-fn score_resume_skills_quality(resume: &serde_json::Value) -> (f64, HashMap<String, serde_json::Value>) {
+fn score_resume_skills_quality(
+    resume: &serde_json::Value,
+) -> (f64, HashMap<String, serde_json::Value>) {
     let skills = resume
         .get("skills")
         .and_then(|v| v.as_array())
@@ -450,7 +477,9 @@ fn score_resume_skills_quality(resume: &serde_json::Value) -> (f64, HashMap<Stri
     (clamp(score, 0.0, 100.0), details)
 }
 
-fn score_resume_experience_quality(resume: &serde_json::Value) -> (f64, HashMap<String, serde_json::Value>) {
+fn score_resume_experience_quality(
+    resume: &serde_json::Value,
+) -> (f64, HashMap<String, serde_json::Value>) {
     let empty_vec = vec![];
     let exp = resume
         .get("experience")
@@ -459,7 +488,10 @@ fn score_resume_experience_quality(resume: &serde_json::Value) -> (f64, HashMap<
 
     if exp.is_empty() {
         let mut details = HashMap::new();
-        details.insert("reason".to_string(), serde_json::json!("no_experience_entries"));
+        details.insert(
+            "reason".to_string(),
+            serde_json::json!("no_experience_entries"),
+        );
         return (0.0, details);
     }
 
@@ -482,7 +514,10 @@ fn score_resume_experience_quality(resume: &serde_json::Value) -> (f64, HashMap<
 
     if total_bullets == 0 {
         let mut details = HashMap::new();
-        details.insert("reason".to_string(), serde_json::json!("experience_without_bullets"));
+        details.insert(
+            "reason".to_string(),
+            serde_json::json!("experience_without_bullets"),
+        );
         return (15.0, details);
     }
 
@@ -496,11 +531,23 @@ fn score_resume_experience_quality(resume: &serde_json::Value) -> (f64, HashMap<
     let score = vol + action + quant;
 
     let mut details = HashMap::new();
-    details.insert("total_bullets".to_string(), serde_json::json!(total_bullets));
-    details.insert("action_bullets".to_string(), serde_json::json!(action_bullets));
-    details.insert("quantified_bullets".to_string(), serde_json::json!(quantified_bullets));
+    details.insert(
+        "total_bullets".to_string(),
+        serde_json::json!(total_bullets),
+    );
+    details.insert(
+        "action_bullets".to_string(),
+        serde_json::json!(action_bullets),
+    );
+    details.insert(
+        "quantified_bullets".to_string(),
+        serde_json::json!(quantified_bullets),
+    );
     details.insert("action_ratio".to_string(), serde_json::json!(action_ratio));
-    details.insert("quantified_ratio".to_string(), serde_json::json!(quant_ratio));
+    details.insert(
+        "quantified_ratio".to_string(),
+        serde_json::json!(quant_ratio),
+    );
 
     (clamp(score, 0.0, 100.0), details)
 }
@@ -514,7 +561,10 @@ fn score_resume_impact(resume: &serde_json::Value) -> (f64, HashMap<String, serd
 
     if exp.is_empty() {
         let mut details = HashMap::new();
-        details.insert("reason".to_string(), serde_json::json!("no_experience_entries"));
+        details.insert(
+            "reason".to_string(),
+            serde_json::json!("no_experience_entries"),
+        );
         return (0.0, details);
     }
 
@@ -530,7 +580,10 @@ fn score_resume_impact(resume: &serde_json::Value) -> (f64, HashMap<String, serd
     }
 
     let quantified = bullets.iter().filter(|b| contains_number(b)).count();
-    let outcome = bullets.iter().filter(|b| contains_outcome_language(b)).count();
+    let outcome = bullets
+        .iter()
+        .filter(|b| contains_outcome_language(b))
+        .count();
     let strong = bullets
         .iter()
         .filter(|b| {
@@ -550,8 +603,14 @@ fn score_resume_impact(resume: &serde_json::Value) -> (f64, HashMap<String, serd
     details.insert("quantified".to_string(), serde_json::json!(quantified));
     details.insert("outcome".to_string(), serde_json::json!(outcome));
     details.insert("strong".to_string(), serde_json::json!(strong));
-    details.insert("quantified_ratio".to_string(), serde_json::json!(quantified_ratio));
-    details.insert("outcome_ratio".to_string(), serde_json::json!(outcome_ratio));
+    details.insert(
+        "quantified_ratio".to_string(),
+        serde_json::json!(quantified_ratio),
+    );
+    details.insert(
+        "outcome_ratio".to_string(),
+        serde_json::json!(outcome_ratio),
+    );
     details.insert("strong_ratio".to_string(), serde_json::json!(strong_ratio));
 
     (clamp(score, 0.0, 100.0), details)
@@ -562,10 +621,7 @@ fn score_resume_impact(resume: &serde_json::Value) -> (f64, HashMap<String, serd
 // -------------------------
 
 /// Score a job posting across multiple quality categories.
-pub fn score_job(
-    job: &serde_json::Value,
-    weights_path: Option<&str>,
-) -> Result<ScoreReport> {
+pub fn score_job(job: &serde_json::Value, weights_path: Option<&str>) -> Result<ScoreReport> {
     let all_weights = load_scoring_weights(weights_path);
     let job_weights = all_weights
         .get("job")
@@ -654,9 +710,15 @@ fn score_job_completeness(job: &serde_json::Value) -> (f64, HashMap<String, serd
     details.insert("has_title".to_string(), serde_json::json!(has_title));
     details.insert("has_company".to_string(), serde_json::json!(has_company));
     details.insert("has_location".to_string(), serde_json::json!(has_location));
-    details.insert("has_description".to_string(), serde_json::json!(has_description));
+    details.insert(
+        "has_description".to_string(),
+        serde_json::json!(has_description),
+    );
     details.insert("has_url".to_string(), serde_json::json!(has_url));
-    details.insert("description_length".to_string(), serde_json::json!(description.len()));
+    details.insert(
+        "description_length".to_string(),
+        serde_json::json!(description.len()),
+    );
 
     (clamp(score, 0.0, 100.0), details)
 }
@@ -666,7 +728,10 @@ fn score_job_clarity(job: &serde_json::Value) -> (f64, HashMap<String, serde_jso
 
     if desc.is_empty() {
         let mut details = HashMap::new();
-        details.insert("reason".to_string(), serde_json::json!("missing_description"));
+        details.insert(
+            "reason".to_string(),
+            serde_json::json!("missing_description"),
+        );
         return (0.0, details);
     }
 
@@ -696,7 +761,10 @@ fn score_job_clarity(job: &serde_json::Value) -> (f64, HashMap<String, serde_jso
     let score = (length_score * 0.65) + (section_score * 0.35);
 
     let mut details = HashMap::new();
-    details.insert("description_length".to_string(), serde_json::json!(desc.len()));
+    details.insert(
+        "description_length".to_string(),
+        serde_json::json!(desc.len()),
+    );
     details.insert("section_hits".to_string(), serde_json::json!(section_hits));
 
     (clamp(score, 0.0, 100.0), details)
@@ -835,16 +903,34 @@ fn score_match_keyword_overlap(
     let score = 100.0 * ratio.sqrt();
 
     let mut details = HashMap::new();
-    details.insert("job_token_count".to_string(), serde_json::json!(job_tokens.len()));
-    details.insert("resume_token_count".to_string(), serde_json::json!(resume_tokens.len()));
-    details.insert("overlap_count".to_string(), serde_json::json!(overlap.len()));
-    details.insert("missing_count".to_string(), serde_json::json!(missing.len()));
+    details.insert(
+        "job_token_count".to_string(),
+        serde_json::json!(job_tokens.len()),
+    );
+    details.insert(
+        "resume_token_count".to_string(),
+        serde_json::json!(resume_tokens.len()),
+    );
+    details.insert(
+        "overlap_count".to_string(),
+        serde_json::json!(overlap.len()),
+    );
+    details.insert(
+        "missing_count".to_string(),
+        serde_json::json!(missing.len()),
+    );
     details.insert("overlap_ratio".to_string(), serde_json::json!(ratio));
 
     let sample_overlap: Vec<String> = overlap.iter().take(20).map(|s| s.to_string()).collect();
     let sample_missing: Vec<String> = missing.iter().take(20).map(|s| s.to_string()).collect();
-    details.insert("sample_overlap".to_string(), serde_json::json!(sample_overlap));
-    details.insert("sample_missing".to_string(), serde_json::json!(sample_missing));
+    details.insert(
+        "sample_overlap".to_string(),
+        serde_json::json!(sample_overlap),
+    );
+    details.insert(
+        "sample_missing".to_string(),
+        serde_json::json!(sample_missing),
+    );
 
     (clamp(score, 0.0, 100.0), details)
 }
@@ -867,15 +953,14 @@ fn score_match_skills_overlap(
 
     if skills.is_empty() {
         let mut details = HashMap::new();
-        details.insert("reason".to_string(), serde_json::json!("resume_has_no_skills"));
+        details.insert(
+            "reason".to_string(),
+            serde_json::json!("resume_has_no_skills"),
+        );
         return (0.0, details);
     }
 
-    let job_text = vec![
-        safe_str(job.get("title")),
-        safe_str(job.get("description")),
-    ]
-    .join(" ");
+    let job_text = vec![safe_str(job.get("title")), safe_str(job.get("description"))].join(" ");
     let job_tokens = extract_keywords(&job_text);
 
     let mut matched = HashSet::new();
@@ -892,7 +977,10 @@ fn score_match_skills_overlap(
             }
         } else {
             // Multi-token skill: require 60%+ tokens present
-            let hits = skill_tokens.iter().filter(|t| job_tokens.contains(*t)).count();
+            let hits = skill_tokens
+                .iter()
+                .filter(|t| job_tokens.contains(*t))
+                .count();
             if hits as f64 / skill_tokens.len() as f64 >= 0.6 {
                 matched.insert(skill.clone());
             }
@@ -903,12 +991,21 @@ fn score_match_skills_overlap(
     let score = 100.0 * ratio;
 
     let mut details = HashMap::new();
-    details.insert("resume_skill_count".to_string(), serde_json::json!(skills.len()));
-    details.insert("matched_skill_count".to_string(), serde_json::json!(matched.len()));
+    details.insert(
+        "resume_skill_count".to_string(),
+        serde_json::json!(skills.len()),
+    );
+    details.insert(
+        "matched_skill_count".to_string(),
+        serde_json::json!(matched.len()),
+    );
     details.insert("match_ratio".to_string(), serde_json::json!(ratio));
 
     let sample_matched: Vec<String> = matched.iter().take(20).cloned().collect();
-    details.insert("sample_matched_skills".to_string(), serde_json::json!(sample_matched));
+    details.insert(
+        "sample_matched_skills".to_string(),
+        serde_json::json!(sample_matched),
+    );
 
     (clamp(score, 0.0, 100.0), details)
 }
@@ -944,7 +1041,10 @@ fn score_match_role_alignment(
 
     if titles.is_empty() {
         let mut details = HashMap::new();
-        details.insert("reason".to_string(), serde_json::json!("missing_resume_titles"));
+        details.insert(
+            "reason".to_string(),
+            serde_json::json!("missing_resume_titles"),
+        );
         return (25.0, details); // Don't hard-zero
     }
 
@@ -952,7 +1052,10 @@ fn score_match_role_alignment(
 
     if job_toks.is_empty() {
         let mut details = HashMap::new();
-        details.insert("reason".to_string(), serde_json::json!("job_title_no_tokens"));
+        details.insert(
+            "reason".to_string(),
+            serde_json::json!("job_title_no_tokens"),
+        );
         return (0.0, details);
     }
 
@@ -976,7 +1079,10 @@ fn score_match_role_alignment(
 
     let mut details = HashMap::new();
     details.insert("job_title".to_string(), serde_json::json!(job_title));
-    details.insert("best_resume_title".to_string(), serde_json::json!(best_title));
+    details.insert(
+        "best_resume_title".to_string(),
+        serde_json::json!(best_title),
+    );
     details.insert("best_overlap_ratio".to_string(), serde_json::json!(best));
 
     (clamp(score, 0.0, 100.0), details)
@@ -1013,10 +1119,7 @@ fn clamp(x: f64, lo: f64, hi: f64) -> f64 {
 }
 
 fn safe_str(value: Option<&serde_json::Value>) -> String {
-    value
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string()
+    value.and_then(|v| v.as_str()).unwrap_or("").to_string()
 }
 
 fn extract_bullets(description: Option<&serde_json::Value>) -> Vec<String> {
@@ -1118,7 +1221,10 @@ fn extract_keywords(text: &str) -> HashSet<String> {
 
         // Filter out very short tokens except known technical terms
         if lower.len() <= 2 {
-            if matches!(lower.as_str(), "c" | "go" | "ai" | "ml" | "ui" | "ux" | "qa" | "c#" | "c++") {
+            if matches!(
+                lower.as_str(),
+                "c" | "go" | "ai" | "ml" | "ui" | "ux" | "qa" | "c#" | "c++"
+            ) {
                 keywords.insert(lower);
             }
             continue;
@@ -1158,32 +1264,67 @@ fn contains_number(s: &str) -> bool {
 
 fn contains_outcome_language(s: &str) -> bool {
     let lower = s.to_lowercase();
-    outcome_markers().iter().any(|&marker| lower.contains(marker))
+    outcome_markers()
+        .iter()
+        .any(|&marker| lower.contains(marker))
 }
 
 fn stopwords() -> &'static [&'static str] {
     &[
-        "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from",
-        "has", "have", "he", "in", "is", "it", "its", "of", "on", "or", "that",
-        "the", "their", "they", "this", "to", "was", "were", "will", "with",
-        "you", "your", "we", "our", "us",
+        "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "has", "have", "he",
+        "in", "is", "it", "its", "of", "on", "or", "that", "the", "their", "they", "this", "to",
+        "was", "were", "will", "with", "you", "your", "we", "our", "us",
     ]
 }
 
 fn action_verbs() -> &'static [&'static str] {
     &[
-        "built", "created", "designed", "developed", "delivered", "implemented",
-        "improved", "increased", "reduced", "optimized", "automated", "led",
-        "managed", "owned", "shipped", "launched", "migrated", "refactored",
-        "collaborated", "analyzed", "architected", "tested", "deployed",
+        "built",
+        "created",
+        "designed",
+        "developed",
+        "delivered",
+        "implemented",
+        "improved",
+        "increased",
+        "reduced",
+        "optimized",
+        "automated",
+        "led",
+        "managed",
+        "owned",
+        "shipped",
+        "launched",
+        "migrated",
+        "refactored",
+        "collaborated",
+        "analyzed",
+        "architected",
+        "tested",
+        "deployed",
     ]
 }
 
 fn outcome_markers() -> &'static [&'static str] {
     &[
-        "improved", "increased", "reduced", "decreased", "accelerated", "saved",
-        "cut", "boosted", "grew", "optimized", "revenue", "cost", "latency",
-        "throughput", "uptime", "performance", "efficiency", "scalability",
+        "improved",
+        "increased",
+        "reduced",
+        "decreased",
+        "accelerated",
+        "saved",
+        "cut",
+        "boosted",
+        "grew",
+        "optimized",
+        "revenue",
+        "cost",
+        "latency",
+        "throughput",
+        "uptime",
+        "performance",
+        "efficiency",
+        "scalability",
     ]
 }
 

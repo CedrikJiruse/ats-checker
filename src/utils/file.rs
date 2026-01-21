@@ -1,7 +1,7 @@
 //! File operation utilities.
 
-use std::path::Path;
 use crate::error::Result;
+use std::path::Path;
 
 /// Ensure a directory exists.
 pub fn ensure_directory(path: impl AsRef<Path>) -> Result<()> {

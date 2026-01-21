@@ -12,5 +12,7 @@ pub fn is_valid_url(s: &str) -> bool {
 
 /// Sanitize a string by removing control characters.
 pub fn sanitize_string(s: &str) -> String {
-    s.chars().filter(|c| !c.is_control() || c.is_whitespace()).collect()
+    s.chars()
+        .filter(|c| !c.is_control() || c.is_whitespace())
+        .collect()
 }

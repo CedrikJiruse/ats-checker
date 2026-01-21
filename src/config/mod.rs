@@ -181,31 +181,81 @@ pub struct Config {
 }
 
 // Default value functions
-fn default_input_resumes_folder() -> PathBuf { PathBuf::from("workspace/input_resumes") }
-fn default_job_descriptions_folder() -> PathBuf { PathBuf::from("workspace/job_descriptions") }
-fn default_output_folder() -> PathBuf { PathBuf::from("workspace/output") }
-fn default_state_file() -> PathBuf { PathBuf::from("data/processed_resumes_state.toml") }
-fn default_scoring_weights_file() -> PathBuf { PathBuf::from("config/scoring_weights.toml") }
-fn default_saved_searches_file() -> PathBuf { PathBuf::from("data/saved_searches.toml") }
-fn default_job_search_results_folder() -> PathBuf { PathBuf::from("workspace/job_search_results") }
-fn default_gemini_api_key_env() -> String { "GEMINI_API_KEY".to_string() }
-fn default_model_name() -> String { "gemini-pro".to_string() }
-fn default_temperature() -> f64 { 0.7 }
-fn default_top_p() -> f64 { 0.95 }
-fn default_top_k() -> i32 { 40 }
-fn default_max_output_tokens() -> i32 { 8192 }
-fn default_num_versions_per_job() -> i32 { 1 }
-fn default_target_score() -> f64 { 80.0 }
-fn default_max_iterations() -> i32 { 3 }
-fn default_iteration_strategy() -> String { "best_of".to_string() }
-fn default_max_regressions() -> i32 { 2 }
-fn default_max_concurrent_requests() -> i32 { 1 }
-fn default_structured_output_format() -> String { "toml".to_string() }
-fn default_resume_schema_path() -> PathBuf { PathBuf::from("config/resume_schema.json") }
-fn default_recommendations_enabled() -> bool { true }
-fn default_recommendations_max_items() -> i32 { 5 }
-fn default_output_subdir_pattern() -> String { "{resume_name}/{job_title}/{timestamp}".to_string() }
-fn default_job_search_max_results() -> i32 { 50 }
+fn default_input_resumes_folder() -> PathBuf {
+    PathBuf::from("workspace/input_resumes")
+}
+fn default_job_descriptions_folder() -> PathBuf {
+    PathBuf::from("workspace/job_descriptions")
+}
+fn default_output_folder() -> PathBuf {
+    PathBuf::from("workspace/output")
+}
+fn default_state_file() -> PathBuf {
+    PathBuf::from("data/processed_resumes_state.toml")
+}
+fn default_scoring_weights_file() -> PathBuf {
+    PathBuf::from("config/scoring_weights.toml")
+}
+fn default_saved_searches_file() -> PathBuf {
+    PathBuf::from("data/saved_searches.toml")
+}
+fn default_job_search_results_folder() -> PathBuf {
+    PathBuf::from("workspace/job_search_results")
+}
+fn default_gemini_api_key_env() -> String {
+    "GEMINI_API_KEY".to_string()
+}
+fn default_model_name() -> String {
+    "gemini-pro".to_string()
+}
+fn default_temperature() -> f64 {
+    0.7
+}
+fn default_top_p() -> f64 {
+    0.95
+}
+fn default_top_k() -> i32 {
+    40
+}
+fn default_max_output_tokens() -> i32 {
+    8192
+}
+fn default_num_versions_per_job() -> i32 {
+    1
+}
+fn default_target_score() -> f64 {
+    80.0
+}
+fn default_max_iterations() -> i32 {
+    3
+}
+fn default_iteration_strategy() -> String {
+    "best_of".to_string()
+}
+fn default_max_regressions() -> i32 {
+    2
+}
+fn default_max_concurrent_requests() -> i32 {
+    1
+}
+fn default_structured_output_format() -> String {
+    "toml".to_string()
+}
+fn default_resume_schema_path() -> PathBuf {
+    PathBuf::from("config/resume_schema.json")
+}
+fn default_recommendations_enabled() -> bool {
+    true
+}
+fn default_recommendations_max_items() -> i32 {
+    5
+}
+fn default_output_subdir_pattern() -> String {
+    "{resume_name}/{job_title}/{timestamp}".to_string()
+}
+fn default_job_search_max_results() -> i32 {
+    50
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -354,10 +404,7 @@ impl Config {
         if !valid_strategies.contains(&self.iteration_strategy.as_str()) {
             return Err(AtsError::ConfigInvalidValue {
                 field: "iteration_strategy".to_string(),
-                message: format!(
-                    "Must be one of: {}",
-                    valid_strategies.join(", ")
-                ),
+                message: format!("Must be one of: {}", valid_strategies.join(", ")),
             });
         }
 
@@ -429,8 +476,12 @@ pub struct AgentConfig {
     pub extras: HashMap<String, serde_json::Value>,
 }
 
-fn default_provider() -> String { "gemini".to_string() }
-fn default_true() -> bool { true }
+fn default_provider() -> String {
+    "gemini".to_string()
+}
+fn default_true() -> bool {
+    true
+}
 
 /// Job portal configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

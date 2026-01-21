@@ -154,7 +154,7 @@ impl JobPosting {
 
     /// Get a unique identifier for this job (based on URL hash).
     pub fn id(&self) -> String {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(self.url.as_bytes());
         hex::encode(&hasher.finalize()[..8])
@@ -340,11 +340,7 @@ fn default_max_results() -> i32 {
 
 impl SavedSearch {
     /// Create a new saved search.
-    pub fn new(
-        name: impl Into<String>,
-        filters: SearchFilters,
-        sources: Vec<String>,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, filters: SearchFilters, sources: Vec<String>) -> Self {
         Self {
             name: name.into(),
             filters,
@@ -489,7 +485,10 @@ mod tests {
 
     #[test]
     fn test_job_source_parsing() {
-        assert_eq!("linkedin".parse::<JobSource>().unwrap(), JobSource::LinkedIn);
+        assert_eq!(
+            "linkedin".parse::<JobSource>().unwrap(),
+            JobSource::LinkedIn
+        );
         assert_eq!("INDEED".parse::<JobSource>().unwrap(), JobSource::Indeed);
         assert!("unknown".parse::<JobSource>().is_err());
     }

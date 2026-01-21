@@ -1,8 +1,8 @@
 //! File hashing utilities.
 
-use std::path::Path;
-use sha2::{Sha256, Digest};
 use crate::error::{AtsError, Result};
+use sha2::{Digest, Sha256};
+use std::path::Path;
 
 /// Calculate SHA256 hash of a file.
 pub fn calculate_file_hash(path: impl AsRef<Path>) -> Result<String> {
