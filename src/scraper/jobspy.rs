@@ -25,6 +25,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::error::{AtsError, Result};
+use crate::scraper::setup::{auto_install_deps, check_dependencies};
 use crate::scraper::{JobPosting, JobScraper, JobSource, SearchFilters};
 
 /// `JobSpy` scraper that executes Python subprocess.
@@ -145,28 +146,26 @@ impl JobSpyScraper {
 
     /// Check if Python and `JobSpy` are available.
     ///
+    /// This method will attempt to automatically install missing dependencies
+    /// using pip if possible.
+    ///
     /// # Errors
     ///
     /// Returns an error if:
     /// - Python executable is not found
-    /// - `JobSpy` library is not installed
+    /// - `JobSpy` library is not installed and auto-install failed
     /// - The bridge script is not found
     pub fn check_dependencies(&self) -> Result<()> {
-        // Check Python
-        let python_check = Command::new(&self.python_exe)
-            .arg("--version")
-            .output()
-            .map_err(|e| AtsError::ScraperError {
-                message: format!(
-                    "Python not found: {e}\n\
-                     Please install Python 3.8+ from https://python.org"
-                ),
-                source: Some(Box::new(e)),
-            })?;
+        // First check using the setup module
+        let dep_check = check_dependencies();
 
-        if !python_check.status.success() {
+        // If Python is not available, we can't proceed
+        if !dep_check.python_available {
             return Err(AtsError::ScraperError {
-                message: "Python execution failed".to_string(),
+                message: "Python is not installed or not in PATH.\n\
+                     Please install Python 3.8+ from <https://python.org>\n\
+                     After installation, restart this application."
+                    .to_string(),
                 source: None,
             });
         }
@@ -176,30 +175,42 @@ impl JobSpyScraper {
             return Err(AtsError::ScraperError {
                 message: format!(
                     "JobSpy bridge script not found at: {}\n\
-                     Please ensure the python_jobspy directory exists and run setup:\n\
-                     Windows: python_jobspy/setup_windows.bat\n\
-                     Linux/Mac: ./python_jobspy/setup.sh",
+                     Please ensure the python_jobspy directory exists.",
                     self.bridge_script.display()
                 ),
                 source: None,
             });
         }
 
-        // Check JobSpy installation by running the bridge script with --check
+        // If we have missing dependencies, try to auto-install
+        if !dep_check.missing_deps.is_empty() {
+            if let Some(info) = &dep_check.python_info {
+                println!(
+                    "\nMissing Python packages detected. Attempting automatic installation..."
+                );
+                auto_install_deps(&info.executable, &dep_check.missing_deps)?;
+                println!();
+            }
+        }
+
+        // Final check - verify JobSpy can be imported
         let jobspy_check = Command::new(&self.python_exe)
-            .arg(&self.bridge_script)
+            .arg("-c")
+            .arg("import jobspy")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .output()
-            .map_err(|e| AtsError::ScraperError {
-                message: format!(
-                    "Failed to check JobSpy: {e}\n\
-                     Please run setup:\n\
-                     Windows: python_jobspy/setup_windows.bat\n\
-                     Linux/Mac: ./python_jobspy/setup.sh"
-                ),
-                source: Some(Box::new(e)),
+            .map_err(|e| {
+                let python = self.python_exe.clone();
+                AtsError::ScraperError {
+                    message: format!(
+                        "Failed to check JobSpy: {e}\n\
+                         Please install manually:\n\
+                         {python} -m pip install python-jobspy pandas"
+                    ),
+                    source: Some(Box::new(e)),
+                }
             })?;
 
         if !jobspy_check.status.success() {

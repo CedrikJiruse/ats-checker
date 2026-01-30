@@ -109,6 +109,7 @@ pub async fn run_interactive_menu(config: Config) -> Result<()> {
         println!("8. Test OCR");
         println!("9. View history");
         println!("10. Check API keys");
+        println!("11. Setup JobSpy (job scraping)");
         println!("0. Exit (or press 'q')");
         println!("{}", "-".repeat(60));
 
@@ -194,6 +195,10 @@ pub async fn run_interactive_menu(config: Config) -> Result<()> {
             "10" => {
                 check_api_keys_menu();
                 history.add("Check API keys");
+            }
+            "11" => {
+                jobspy_setup_menu();
+                history.add("Setup JobSpy");
             }
             _ => {
                 println!("Invalid choice. Please try again.");
@@ -1233,5 +1238,43 @@ fn check_api_keys_menu() {
         println!("  Command Prompt: set KEY_NAME=your_key_value");
         println!("  PowerShell:     $env:KEY_NAME=\"your_key_value\"");
         println!("\nFor permanent setup, use System Properties → Environment Variables");
+    }
+}
+
+// -------------------------
+// JobSpy Setup Menu
+// -------------------------
+
+/// Check and setup `JobSpy` dependencies.
+fn jobspy_setup_menu() {
+    use crate::scraper::setup::{run_auto_setup, show_dependency_status};
+
+    println!("\n{}", "-".repeat(60));
+    println!("JobSpy Setup");
+    println!("{}", "-".repeat(60));
+
+    // First show current status
+    show_dependency_status();
+
+    // Ask if user wants to attempt auto-setup
+    println!("\nWould you like to check and install missing dependencies? [Y/n] ");
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).ok();
+
+    if input.trim().is_empty() || input.trim().to_lowercase() == "y" {
+        println!();
+        match run_auto_setup() {
+            Ok(()) => {
+                println!("\n✓ JobSpy setup complete!");
+                println!("You can now use job search functionality.");
+            }
+            Err(e) => {
+                eprintln!("\n✗ Setup failed: {e}");
+                println!("\nPlease try manual installation:");
+                println!("  pip install python-jobspy pandas");
+            }
+        }
     }
 }

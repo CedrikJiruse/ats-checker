@@ -36,12 +36,14 @@ pub mod jobspy;
 mod manager;
 pub mod retry;
 mod saved_search;
+pub mod setup;
 mod types;
 
 pub use cache::{CacheConfig, CacheWrapper};
 pub use manager::JobScraperManager;
 pub use retry::{RetryConfig, RetryWrapper};
 pub use saved_search::SavedSearchManager;
+pub use setup::{run_auto_setup, show_dependency_status, DependencyCheck};
 pub use types::{JobPosting, JobSource, SavedSearch, SearchFilters};
 
 use crate::error::Result;
