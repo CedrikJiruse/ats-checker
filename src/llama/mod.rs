@@ -4,7 +4,7 @@
 //!
 //! # Environment Variables
 //!
-//! - `OLLAMA_HOST`: Optional host URL (defaults to "http://localhost:11434")
+//! - `OLLAMA_HOST`: Optional host URL (defaults to <http://localhost:11434>)
 //!
 //! # Example
 //!
@@ -89,6 +89,7 @@ struct GenerateOptions {
 #[derive(Debug, Deserialize)]
 struct GenerateResponse {
     response: String,
+    #[allow(dead_code)]
     done: bool,
 }
 

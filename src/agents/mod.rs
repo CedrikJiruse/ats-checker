@@ -427,7 +427,7 @@ pub struct OpenAiAgent {
 }
 
 impl OpenAiAgent {
-    /// Create a new OpenAI agent from environment.
+    /// Create a new `OpenAI` agent from environment.
     ///
     /// # Errors
     ///
@@ -445,7 +445,7 @@ impl OpenAiAgent {
         Ok(Self { config, client })
     }
 
-    /// Create a new OpenAI agent with explicit API key.
+    /// Create a new `OpenAI` agent with explicit API key.
     ///
     /// # Errors
     ///

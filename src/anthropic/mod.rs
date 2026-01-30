@@ -97,6 +97,7 @@ struct MessagesResponse {
 #[derive(Debug, Deserialize)]
 struct ContentBlock {
     #[serde(rename = "type")]
+    #[allow(dead_code)]
     content_type: String,
     text: Option<String>,
 }
@@ -234,7 +235,7 @@ impl AnthropicClient {
             top_k: self.generation_config.top_k,
         };
 
-        let url = format!("{}/messages", ANTHROPIC_API_BASE);
+        let url = format!("{ANTHROPIC_API_BASE}/messages");
 
         let response = self
             .client

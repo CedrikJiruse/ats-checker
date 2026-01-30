@@ -25,7 +25,7 @@
 //! - [`recommendations`] - Improvement recommendations generation
 //! - [`validation`] - JSON Schema validation
 //! - [`gemini`] - Gemini API integration
-//! - [`openai`] - OpenAI API integration
+//! - [`openai`] - `OpenAI` API integration
 //! - [`anthropic`] - Anthropic Claude API integration
 //! - [`llama`] - Llama (Ollama) API integration
 //!

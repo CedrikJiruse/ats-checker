@@ -638,9 +638,8 @@ impl ResumeProcessor {
              - required_experience: Years of experience required (if specified)\n\
              - education_requirements: Education requirements\n\
              - summary: A brief 2-3 sentence summary of the position\n\n\
-             Job Description:\n{}\n\n\
-             Output as raw JSON only, no markdown fences.",
-            job_description
+             Job Description:\n{job_description}\n\n\
+             Output as raw JSON only, no markdown fences."
         );
 
         agent.generate_json(&prompt).await

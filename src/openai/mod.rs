@@ -1,6 +1,6 @@
-//! OpenAI API integration module.
+//! `OpenAI` API integration module.
 //!
-//! This module provides a client for the OpenAI API.
+//! This module provides a client for the `OpenAI` API.
 //!
 //! # Environment Variables
 //!
@@ -25,13 +25,13 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// OpenAI API base URL.
+/// `OpenAI` API base URL.
 const OPENAI_API_BASE: &str = "https://api.openai.com/v1";
 
 /// Default timeout for API requests (30 seconds).
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Generation configuration for OpenAI API.
+/// Generation configuration for `OpenAI` API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationConfig {
     /// Temperature for sampling (0.0 to 2.0).
@@ -57,7 +57,7 @@ impl Default for GenerationConfig {
     }
 }
 
-/// Request payload for OpenAI chat completions API.
+/// Request payload for `OpenAI` chat completions API.
 #[derive(Debug, Serialize)]
 struct ChatCompletionRequest {
     model: String,
@@ -77,7 +77,7 @@ struct Message {
     content: String,
 }
 
-/// Response from OpenAI API.
+/// Response from `OpenAI` API.
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
     choices: Vec<Choice>,
@@ -95,7 +95,7 @@ struct MessageResponse {
     content: String,
 }
 
-/// OpenAI API client.
+/// `OpenAI` API client.
 #[derive(Debug)]
 pub struct OpenAiClient {
     api_key: String,
@@ -105,11 +105,11 @@ pub struct OpenAiClient {
 }
 
 impl OpenAiClient {
-    /// Create a new OpenAI client.
+    /// Create a new `OpenAI` client.
     ///
     /// # Arguments
     ///
-    /// * `api_key` - OpenAI API key
+    /// * `api_key` - `OpenAI` API key
     /// * `model_name` - Model to use (e.g., "gpt-4", "gpt-3.5-turbo")
     ///
     /// # Errors
@@ -196,7 +196,7 @@ impl OpenAiClient {
 
     /// Generate content from a text prompt.
     ///
-    /// This is the main method for interacting with the OpenAI API.
+    /// This is the main method for interacting with the `OpenAI` API.
     ///
     /// # Errors
     ///
@@ -220,7 +220,7 @@ impl OpenAiClient {
             max_tokens: self.generation_config.max_tokens,
         };
 
-        let url = format!("{}/chat/completions", OPENAI_API_BASE);
+        let url = format!("{OPENAI_API_BASE}/chat/completions");
 
         let response = self
             .client
