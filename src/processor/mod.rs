@@ -203,21 +203,26 @@ impl ResumeProcessor {
 
         // Step 4: Enhance resume using AI
         log::info!("Enhancing resume with AI...");
-        let enhanced_resume = self.enhance_resume(&resume_text, job_text.as_deref()).await?;
+        let enhanced_resume = self
+            .enhance_resume(&resume_text, job_text.as_deref())
+            .await?;
 
         // Step 5: Validate schema (if enabled)
         if self.config.schema_validation_enabled {
             log::info!("Validating enhanced resume against schema...");
             // Load schema file
-            let schema_content = std::fs::read_to_string(&self.config.resume_schema_path)
-                .map_err(|e| AtsError::io(
-                    format!("Failed to read schema file: {}", self.config.resume_schema_path.display()),
-                    e
-                ))?;
+            let schema_content =
+                std::fs::read_to_string(&self.config.resume_schema_path).map_err(|e| {
+                    AtsError::io(
+                        format!(
+                            "Failed to read schema file: {}",
+                            self.config.resume_schema_path.display()
+                        ),
+                        e,
+                    )
+                })?;
             let schema: serde_json::Value = serde_json::from_str(&schema_content)
-                .map_err(|e| AtsError::internal(
-                    format!("Failed to parse schema JSON: {e}")
-                ))?;
+                .map_err(|e| AtsError::internal(format!("Failed to parse schema JSON: {e}")))?;
 
             let validation = validate_json(&enhanced_resume, &schema)?;
             if !validation.ok {
@@ -239,11 +244,7 @@ impl ResumeProcessor {
                 "description": job_txt,
                 "raw_text": job_txt
             });
-            Some(score_match(
-                &enhanced_resume,
-                &job_json,
-                weights_path,
-            )?)
+            Some(score_match(&enhanced_resume, &job_json, weights_path)?)
         } else {
             None
         };
@@ -281,12 +282,10 @@ impl ResumeProcessor {
         let recommendations = if self.config.recommendations_enabled {
             log::info!("Generating recommendations...");
             // Convert score report to JSON for recommendation generation
-            let score_json = serde_json::to_value(&final_resume_score)
-                .map_err(|e| AtsError::internal(format!("Failed to serialize score report: {e}")))?;
-            generate_recommendations(
-                &score_json,
-                self.config.recommendations_max_items as usize,
-            )
+            let score_json = serde_json::to_value(&final_resume_score).map_err(|e| {
+                AtsError::internal(format!("Failed to serialize score report: {e}"))
+            })?;
+            generate_recommendations(&score_json, self.config.recommendations_max_items as usize)
         } else {
             vec![]
         };
@@ -340,9 +339,10 @@ impl ResumeProcessor {
         job_text: Option<&str>,
     ) -> Result<serde_json::Value> {
         // Get the enhancer agent
-        let agent = self.agent_registry.get("enhancer").map_err(|_| {
-            AtsError::internal("Enhancer agent not found in registry")
-        })?;
+        let agent = self
+            .agent_registry
+            .get("enhancer")
+            .map_err(|_| AtsError::internal("Enhancer agent not found in registry"))?;
 
         // Build prompt
         let prompt = if let Some(job) = job_text {
@@ -380,12 +380,16 @@ impl ResumeProcessor {
         initial_resume_score: ScoreReport,
         initial_match_score: Option<ScoreReport>,
     ) -> Result<(serde_json::Value, ScoreReport, Option<ScoreReport>)> {
-        let strategy = self.config.iteration_strategy.parse::<IterationStrategy>()?;
+        let strategy = self
+            .config
+            .iteration_strategy
+            .parse::<IterationStrategy>()?;
 
         let mut best_resume = initial_resume;
         let mut best_resume_score = initial_resume_score;
         let mut best_match_score = initial_match_score;
-        let mut best_combined = self.calculate_combined_score(&best_resume_score, best_match_score.as_ref());
+        let mut best_combined =
+            self.calculate_combined_score(&best_resume_score, best_match_score.as_ref());
 
         let mut no_improvement_count = 0;
 
@@ -400,8 +404,7 @@ impl ResumeProcessor {
                 .await?;
 
             // Score new candidate
-            let candidate_resume_score =
-                score_resume(&candidate, weights_path)?;
+            let candidate_resume_score = score_resume(&candidate, weights_path)?;
 
             let candidate_match_score = if let Some(job_txt) = job_text {
                 // Convert job text to JSON structure
@@ -409,17 +412,13 @@ impl ResumeProcessor {
                     "description": job_txt,
                     "raw_text": job_txt
                 });
-                Some(score_match(
-                    &candidate,
-                    &job_json,
-                    weights_path,
-                )?)
+                Some(score_match(&candidate, &job_json, weights_path)?)
             } else {
                 None
             };
 
-            let candidate_combined =
-                self.calculate_combined_score(&candidate_resume_score, candidate_match_score.as_ref());
+            let candidate_combined = self
+                .calculate_combined_score(&candidate_resume_score, candidate_match_score.as_ref());
 
             log::info!(
                 "Candidate score: {candidate_combined:.2} (previous best: {best_combined:.2})"
@@ -449,7 +448,9 @@ impl ResumeProcessor {
                 if strategy == IterationStrategy::Patience
                     && no_improvement_count >= self.config.max_regressions
                 {
-                    log::info!("No improvement for {no_improvement_count} iterations, stopping (Patience)");
+                    log::info!(
+                        "No improvement for {no_improvement_count} iterations, stopping (Patience)"
+                    );
                     break;
                 }
             }
@@ -472,9 +473,10 @@ impl ResumeProcessor {
         job_text: Option<&str>,
     ) -> Result<serde_json::Value> {
         // Get the reviser agent
-        let agent = self.agent_registry.get("reviser").map_err(|_| {
-            AtsError::internal("Reviser agent not found in registry")
-        })?;
+        let agent = self
+            .agent_registry
+            .get("reviser")
+            .map_err(|_| AtsError::internal("Reviser agent not found in registry"))?;
 
         // Build revision prompt with score feedback
         let score_feedback = format!(
@@ -565,6 +567,83 @@ impl ResumeProcessor {
         }
 
         Ok(results)
+    }
+
+    /// Summarize a job description using the AI agent.
+    ///
+    /// This method takes a raw job description and returns a structured summary
+    /// including key requirements, responsibilities, qualifications, and skills.
+    ///
+    /// # Arguments
+    ///
+    /// * `job_description` - The raw job description text to summarize
+    ///
+    /// # Returns
+    ///
+    /// Returns a JSON object containing the structured summary.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No AI agent is configured
+    /// - The agent fails to generate a summary
+    /// - The response is not valid JSON
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use ats_checker::{Config, ResumeProcessor};
+    /// # #[tokio::main]
+    /// # async fn main() -> anyhow::Result<()> {
+    /// # let config = Config::load("config/config.toml")?;
+    /// # let mut processor = ResumeProcessor::new(config)?;
+    /// let job_desc = "We are looking for a senior software engineer...";
+    /// let summary = processor.summarize_job(job_desc).await?;
+    /// println!("Key skills: {:?}", summary.get("key_skills"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn summarize_job(&self, job_description: &str) -> Result<serde_json::Value> {
+        if job_description.trim().is_empty() {
+            return Err(AtsError::InputValidation {
+                message: "Job description cannot be empty".to_string(),
+            });
+        }
+
+        // Get the agent - prefer a job_summarizer role agent, fall back to default
+        let agent_names = self.agent_registry.list();
+        let agent_name: &str =
+            if let Some(&name) = agent_names.iter().find(|&&name| name == "job_summarizer") {
+                name
+            } else if let Some(&name) = agent_names.iter().find(|&&name| name == "enhancer") {
+                name
+            } else if let Some(&name) = agent_names.first() {
+                name
+            } else {
+                return Err(AtsError::AgentConfig {
+                    message: "No AI agent configured for job summarization".to_string(),
+                });
+            };
+
+        let agent = self.agent_registry.get(agent_name)?;
+
+        let prompt = format!(
+            "Summarize the following job description and extract key information. \
+             Return a JSON object with these fields:\n\
+             - title: Job title\n\
+             - company: Company name (if mentioned)\n\
+             - key_responsibilities: Array of main responsibilities\n\
+             - required_skills: Array of required technical skills\n\
+             - preferred_skills: Array of preferred/nice-to-have skills\n\
+             - required_experience: Years of experience required (if specified)\n\
+             - education_requirements: Education requirements\n\
+             - summary: A brief 2-3 sentence summary of the position\n\n\
+             Job Description:\n{}\n\n\
+             Output as raw JSON only, no markdown fences.",
+            job_description
+        );
+
+        agent.generate_json(&prompt).await
     }
 }
 

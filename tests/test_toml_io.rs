@@ -2,7 +2,7 @@
 
 mod common;
 
-use ats_checker::toml_io::{load, dump, loads, dumps};
+use ats_checker::toml_io::{dump, dumps, load, loads};
 use common::*;
 use serde_json::json;
 
@@ -18,15 +18,13 @@ fn test_save_and_load_toml() {
     });
 
     // Save to TOML
-    dump(&data, &file_path)
-        .expect("Failed to save TOML");
+    dump(&data, &file_path).expect("Failed to save TOML");
 
     // Verify file exists
     assert!(file_path.exists());
 
     // Load back
-    let loaded = load(&file_path)
-        .expect("Failed to load TOML");
+    let loaded = load(&file_path).expect("Failed to load TOML");
 
     // Verify data matches
     assert_eq!(loaded, data);

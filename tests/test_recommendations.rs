@@ -181,4 +181,3 @@ fn test_recommendations_with_missing_categories() {
     // Should handle gracefully (may return empty or generic recommendations)
     assert!(recommendations.len() <= 5);
 }
-

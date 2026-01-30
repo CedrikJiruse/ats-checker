@@ -53,11 +53,11 @@ fn test_unicode_paths() {
     // Test various Unicode characters in paths
     let unicode_paths = vec![
         "résumé.txt",
-        "файл.txt",           // Russian
-        "文件.txt",            // Chinese
-        "ファイル.txt",        // Japanese
-        "파일.txt",           // Korean
-        "αρχείο.txt",        // Greek
+        "файл.txt",     // Russian
+        "文件.txt",     // Chinese
+        "ファイル.txt", // Japanese
+        "파일.txt",     // Korean
+        "αρχείο.txt",   // Greek
     ];
 
     for filename in unicode_paths {
@@ -241,9 +241,15 @@ fn test_state_manager_cross_platform_paths() {
     let mut state = StateManager::new(&state_path).unwrap();
 
     // Add entries with different path separators
-    state.update_resume_state("hash1", "output/file1.toml").unwrap();
-    state.update_resume_state("hash2", "output\\file2.toml").unwrap();
-    state.update_resume_state("hash3", "output/nested/file3.toml").unwrap();
+    state
+        .update_resume_state("hash1", "output/file1.toml")
+        .unwrap();
+    state
+        .update_resume_state("hash2", "output\\file2.toml")
+        .unwrap();
+    state
+        .update_resume_state("hash3", "output/nested/file3.toml")
+        .unwrap();
 
     // All should be retrievable
     assert!(state.get_resume_state("hash1").is_some());

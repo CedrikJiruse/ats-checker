@@ -124,7 +124,7 @@ fn test_agent_registry_from_config_unsupported_provider() {
     assert!(result.is_err());
 
     if let Err(e) = result {
-        assert!(e.to_string().contains("not yet supported"));
+        assert!(e.to_string().contains("not supported"));
     }
 }
 

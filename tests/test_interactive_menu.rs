@@ -68,8 +68,14 @@ fn test_menu_options_structure() {
     ];
 
     // Verify we have a reasonable number of menu options
-    assert!(expected_options.len() >= 5, "Menu should have at least 5 options");
-    assert!(expected_options.contains(&"Quit"), "Menu must have a Quit option");
+    assert!(
+        expected_options.len() >= 5,
+        "Menu should have at least 5 options"
+    );
+    assert!(
+        expected_options.contains(&"Quit"),
+        "Menu must have a Quit option"
+    );
 }
 
 #[test]
@@ -83,10 +89,16 @@ fn test_menu_state_consistency() {
     // Simulate multiple menu operations
     for _ in 0..10 {
         operation_count += 1;
-        assert!(operation_count <= max_operations, "Menu should handle multiple operations");
+        assert!(
+            operation_count <= max_operations,
+            "Menu should handle multiple operations"
+        );
     }
 
-    assert_eq!(operation_count, 10, "Operation count should be tracked correctly");
+    assert_eq!(
+        operation_count, 10,
+        "Operation count should be tracked correctly"
+    );
 }
 
 #[tokio::test]
@@ -110,5 +122,8 @@ fn test_menu_help_text_exists() {
     ];
 
     // Verify all help texts are non-empty
-    assert!(help_texts.iter().all(|t| !t.is_empty()), "All help texts should be non-empty");
+    assert!(
+        help_texts.iter().all(|t| !t.is_empty()),
+        "All help texts should be non-empty"
+    );
 }

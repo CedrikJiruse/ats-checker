@@ -98,6 +98,41 @@ pub fn list_files_with_extension(
     Ok(files)
 }
 
+/// Sanitize a filename by removing or replacing invalid characters.
+///
+/// Replaces characters that are invalid in filenames across platforms:
+/// - Windows: < > : " / \ | ? *
+/// - Unix: / (null bytes are handled by Rust)
+/// - Common: leading/trailing spaces, control characters
+///
+/// # Arguments
+///
+/// * `name` - The filename to sanitize
+///
+/// # Returns
+///
+/// A sanitized filename safe for use in file systems.
+///
+/// # Example
+///
+/// ```
+/// use ats_checker::utils::file::sanitize_filename;
+///
+/// assert_eq!(sanitize_filename("file<name>.txt"), "file_name_.txt");
+/// assert_eq!(sanitize_filename("path/to/file"), "path_to_file");
+/// assert_eq!(sanitize_filename("  spaces  "), "spaces");
+/// ```
+pub fn sanitize_filename(name: &str) -> String {
+    // Characters invalid in Windows filenames
+    const INVALID_CHARS: &[char] = &['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+
+    name.chars()
+        .map(|c| if INVALID_CHARS.contains(&c) { '_' } else { c })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 /// Validate that a path length is within acceptable limits.
 ///
 /// On Windows, warns if path exceeds 260 characters (legacy `MAX_PATH` limit).
@@ -327,5 +362,58 @@ mod tests {
             "/home/user/documents/projects/resumes/2024/january/software_engineer_position.txt",
         );
         assert!(validate_path_length(&path).is_ok());
+    }
+
+    #[test]
+    fn test_sanitize_filename_basic() {
+        // Test basic invalid characters
+        assert_eq!(sanitize_filename("file<name>.txt"), "file_name_.txt");
+        assert_eq!(sanitize_filename("file>name.txt"), "file_name.txt");
+        assert_eq!(sanitize_filename("file:name.txt"), "file_name.txt");
+        assert_eq!(sanitize_filename("file\"name.txt"), "file_name.txt");
+        assert_eq!(sanitize_filename("file/name.txt"), "file_name.txt");
+        assert_eq!(sanitize_filename("file\\name.txt"), "file_name.txt");
+        assert_eq!(sanitize_filename("file|name.txt"), "file_name.txt");
+        assert_eq!(sanitize_filename("file?name.txt"), "file_name.txt");
+        assert_eq!(sanitize_filename("file*name.txt"), "file_name.txt");
+    }
+
+    #[test]
+    fn test_sanitize_filename_multiple_invalid() {
+        // Test multiple invalid characters
+        assert_eq!(sanitize_filename("file<>:/\\|?*.txt"), "file________.txt");
+    }
+
+    #[test]
+    fn test_sanitize_filename_whitespace() {
+        // Test whitespace trimming
+        assert_eq!(sanitize_filename("  filename.txt  "), "filename.txt");
+        assert_eq!(sanitize_filename("\tfilename.txt\n"), "filename.txt");
+    }
+
+    #[test]
+    fn test_sanitize_filename_valid() {
+        // Test that valid filenames are unchanged
+        assert_eq!(
+            sanitize_filename("valid_filename.txt"),
+            "valid_filename.txt"
+        );
+        assert_eq!(sanitize_filename("my-file.name"), "my-file.name");
+        assert_eq!(sanitize_filename("resume_v1.2.pdf"), "resume_v1.2.pdf");
+    }
+
+    #[test]
+    fn test_sanitize_filename_empty() {
+        // Test empty string
+        assert_eq!(sanitize_filename(""), "");
+        assert_eq!(sanitize_filename("   "), "");
+    }
+
+    #[test]
+    fn test_sanitize_filename_unicode() {
+        // Test unicode characters (should be preserved)
+        assert_eq!(sanitize_filename("файл.txt"), "файл.txt");
+        assert_eq!(sanitize_filename("ファイル.txt"), "ファイル.txt");
+        assert_eq!(sanitize_filename("简历.pdf"), "简历.pdf");
     }
 }

@@ -11,8 +11,14 @@ fn test_config_from_toml_string() {
     let config: Config = toml::from_str(toml_str).expect("Failed to parse config TOML");
 
     // Verify paths are set
-    assert_eq!(config.input_resumes_folder.to_str().unwrap(), "workspace/input_resumes");
-    assert_eq!(config.job_descriptions_folder.to_str().unwrap(), "workspace/job_descriptions");
+    assert_eq!(
+        config.input_resumes_folder.to_str().unwrap(),
+        "workspace/input_resumes"
+    );
+    assert_eq!(
+        config.job_descriptions_folder.to_str().unwrap(),
+        "workspace/job_descriptions"
+    );
     assert_eq!(config.output_folder.to_str().unwrap(), "workspace/output");
 
     // Verify processing settings
@@ -42,11 +48,13 @@ fn test_config_serialization_roundtrip() {
     let toml_string = toml::to_string(&config).expect("Failed to serialize config");
 
     // Deserialize back
-    let deserialized: Config = toml::from_str(&toml_string)
-        .expect("Failed to deserialize config");
+    let deserialized: Config = toml::from_str(&toml_string).expect("Failed to deserialize config");
 
     // Verify key fields match
-    assert_eq!(config.num_versions_per_job, deserialized.num_versions_per_job);
+    assert_eq!(
+        config.num_versions_per_job,
+        deserialized.num_versions_per_job
+    );
     assert_eq!(config.max_iterations, deserialized.max_iterations);
     assert_eq!(config.target_score, deserialized.target_score);
 }
@@ -63,6 +71,10 @@ fn test_config_with_custom_paths() {
     };
 
     // Verify paths are set correctly
-    assert!(config.input_resumes_folder.to_str().unwrap().contains("resumes"));
+    assert!(config
+        .input_resumes_folder
+        .to_str()
+        .unwrap()
+        .contains("resumes"));
     assert!(config.output_folder.to_str().unwrap().contains("output"));
 }

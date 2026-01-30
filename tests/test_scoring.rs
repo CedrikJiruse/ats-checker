@@ -2,7 +2,7 @@
 
 mod common;
 
-use ats_checker::scoring::{score_resume, score_match};
+use ats_checker::scoring::{score_match, score_resume};
 use common::*;
 
 #[test]
@@ -36,8 +36,7 @@ fn test_score_resume_without_weights() {
     let resume = sample_resume_json();
 
     // Score without weights file (should use defaults)
-    let report = score_resume(&resume, None)
-        .expect("Failed to score resume without weights");
+    let report = score_resume(&resume, None).expect("Failed to score resume without weights");
 
     // Score should be between 0 and 100
     assert!(report.total >= 0.0 && report.total <= 100.0);
@@ -76,8 +75,7 @@ fn test_score_resume_with_missing_fields() {
         }
     });
 
-    let report = score_resume(&resume, None)
-        .expect("Should handle incomplete resume");
+    let report = score_resume(&resume, None).expect("Should handle incomplete resume");
 
     // Score should still be valid, just lower
     assert!(report.total >= 0.0 && report.total <= 100.0);
@@ -94,10 +92,10 @@ fn test_score_resume_completeness() {
         "experience": []
     });
 
-    let complete_score = score_resume(&complete_resume, None)
-        .expect("Failed to score complete resume");
-    let incomplete_score = score_resume(&incomplete_resume, None)
-        .expect("Failed to score incomplete resume");
+    let complete_score =
+        score_resume(&complete_resume, None).expect("Failed to score complete resume");
+    let incomplete_score =
+        score_resume(&incomplete_resume, None).expect("Failed to score incomplete resume");
 
     assert!(complete_score.total > incomplete_score.total);
 }

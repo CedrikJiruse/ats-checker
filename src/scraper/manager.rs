@@ -137,11 +137,10 @@ impl JobScraperManager {
             let wrapper = ResultsWrapper {
                 jobs: results.to_vec(),
             };
-            let toml_str =
-                toml::to_string_pretty(&wrapper).map_err(|e| AtsError::TomlParse {
-                    message: e.to_string(),
-                    source: None,
-                })?;
+            let toml_str = toml::to_string_pretty(&wrapper).map_err(|e| AtsError::TomlParse {
+                message: e.to_string(),
+                source: None,
+            })?;
             std::fs::write(&path, toml_str)?;
         }
 

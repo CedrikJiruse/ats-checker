@@ -157,7 +157,10 @@ async fn test_interleaved_reads_and_writes() {
         let hash = format!("hash_{}_0", i);
         manager.get_resume_state(&hash).is_some()
     });
-    assert!(has_entries, "State should contain some entries from concurrent writes");
+    assert!(
+        has_entries,
+        "State should contain some entries from concurrent writes"
+    );
 }
 
 #[tokio::test]
@@ -197,10 +200,13 @@ async fn test_atomic_write_prevents_corruption() {
         // Extract the index from the first line
         if let Some(_first_line) = lines.first() {
             // All subsequent lines should match the pattern of the first line
-            let all_same = lines.iter().all(|line| {
-                line.is_empty() || line.contains("Updated content")
-            });
-            assert!(all_same, "File content should not be mixed from different writes");
+            let all_same = lines
+                .iter()
+                .all(|line| line.is_empty() || line.contains("Updated content"));
+            assert!(
+                all_same,
+                "File content should not be mixed from different writes"
+            );
         }
     }
 }
@@ -246,7 +252,10 @@ async fn test_state_persistence_under_load() {
         }
     }
 
-    assert!(found_count > 0, "State should contain entries from concurrent operations");
+    assert!(
+        found_count > 0,
+        "State should contain entries from concurrent operations"
+    );
 }
 
 #[tokio::test]
@@ -264,9 +273,7 @@ async fn test_file_write_atomicity() {
     for i in 0..5 {
         let file_path = Arc::clone(&file_path_arc);
         let content = format!("{}{}", i, &large_content);
-        let handle = task::spawn(async move {
-            atomic_write(file_path.as_ref(), &content)
-        });
+        let handle = task::spawn(async move { atomic_write(file_path.as_ref(), &content) });
         handles.push(handle);
     }
 
@@ -286,7 +293,10 @@ async fn test_file_write_atomicity() {
             // Verify the rest is all x's
             let rest: String = content.chars().skip(1).collect();
             let expected_rest = "x".repeat(10_000);
-            assert_eq!(rest, expected_rest, "Content should be atomic - either complete or not written");
+            assert_eq!(
+                rest, expected_rest,
+                "Content should be atomic - either complete or not written"
+            );
         }
     }
 }
@@ -315,7 +325,9 @@ async fn test_state_clear_during_concurrent_access() {
     {
         let mut manager = StateManager::new(state_file.clone()).unwrap();
         for i in 0..10 {
-            manager.update_resume_state(&format!("hash_{}", i), &format!("path_{}", i)).unwrap();
+            manager
+                .update_resume_state(&format!("hash_{}", i), &format!("path_{}", i))
+                .unwrap();
         }
     }
 

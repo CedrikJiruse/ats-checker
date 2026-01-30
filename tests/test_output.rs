@@ -156,8 +156,15 @@ fn test_generate_outputs_both_formats() {
     assert!(toml_file.exists());
 }
 
-// NOTE: Path sanitization test removed - functionality not yet implemented
-// TODO: Add test_output_path_sanitization once path sanitization is implemented
+use ats_checker::utils::file::sanitize_filename;
+
+#[test]
+fn test_sanitize_filename_helper() {
+    // Test the sanitize_filename function directly
+    assert_eq!(sanitize_filename("file<name>.txt"), "file_name_.txt");
+    assert_eq!(sanitize_filename("path/to/file"), "path_to_file");
+    assert_eq!(sanitize_filename("  spaces  "), "spaces");
+}
 
 #[test]
 fn test_output_path_with_all_placeholders() {
@@ -324,12 +331,10 @@ fn test_manifest_generation() {
         meta: HashMap::new(),
     };
 
-    let recommendations = vec![
-        ats_checker::recommendations::Recommendation {
-            message: "Add more technical skills".to_string(),
-            reason: Some("Skills section needs improvement".to_string()),
-        },
-    ];
+    let recommendations = vec![ats_checker::recommendations::Recommendation {
+        message: "Add more technical skills".to_string(),
+        reason: Some("Skills section needs improvement".to_string()),
+    }];
 
     let output_data = OutputData {
         resume_name: "Manifest_Test".to_string(),
@@ -433,7 +438,10 @@ fn test_output_with_complex_nested_data() {
 
     // Verify nested structure
     assert_eq!(parsed["personal_info"]["name"], "Complex User");
-    assert_eq!(parsed["personal_info"]["contact"]["address"]["city"], "San Francisco");
+    assert_eq!(
+        parsed["personal_info"]["contact"]["address"]["city"],
+        "San Francisco"
+    );
     assert_eq!(parsed["work_experience"][0]["company"], "Tech Corp");
     assert_eq!(parsed["work_experience"][0]["technologies"][0], "Rust");
     assert_eq!(parsed["certifications"][0]["name"], "AWS Certified");
@@ -492,11 +500,17 @@ fn test_txt_format_contains_all_sections() {
     // TXT file should contain formatted sections
     assert!(content.contains("Test User"), "Should contain name");
     assert!(content.contains("test@example.com"), "Should contain email");
-    assert!(content.contains("Experienced software engineer"), "Should contain summary");
+    assert!(
+        content.contains("Experienced software engineer"),
+        "Should contain summary"
+    );
     assert!(content.contains("Company A"), "Should contain company");
     assert!(content.contains("Developer"), "Should contain title");
     assert!(content.contains("University"), "Should contain school");
-    assert!(content.contains("BS Computer Science"), "Should contain degree");
+    assert!(
+        content.contains("BS Computer Science"),
+        "Should contain degree"
+    );
 }
 
 #[test]

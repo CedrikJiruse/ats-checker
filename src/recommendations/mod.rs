@@ -36,19 +36,26 @@ pub fn generate_recommendations(
     let mut recommendations = Vec::new();
 
     // Extract total score and categories from the scoring payload
-    let total_score = scoring.get("total").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+    let total_score = scoring
+        .get("total")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0);
     let categories = scoring.get("categories").and_then(|v| v.as_array());
 
     // If overall score is low, add general recommendation
     if total_score < 50.0 {
         recommendations.push(
             Recommendation::new("Resume needs significant improvement to meet ATS standards")
-                .with_reason(format!("Overall score is {total_score:.1}%, which is below the 50% threshold"))
+                .with_reason(format!(
+                    "Overall score is {total_score:.1}%, which is below the 50% threshold"
+                )),
         );
     } else if total_score < 70.0 {
         recommendations.push(
             Recommendation::new("Resume could be improved to better match job requirements")
-                .with_reason(format!("Overall score is {total_score:.1}%, aiming for 70%+ is recommended"))
+                .with_reason(format!(
+                    "Overall score is {total_score:.1}%, aiming for 70%+ is recommended"
+                )),
         );
     }
 
@@ -56,7 +63,10 @@ pub fn generate_recommendations(
     if let Some(cats) = categories {
         for cat in cats {
             let name = cat.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let score = cat.get("score").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+            let score = cat
+                .get("score")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
             let details = cat.get("details");
 
             // Generate recommendations for low-scoring categories
@@ -88,7 +98,9 @@ pub fn generate_recommendations(
                     }
                     "keyword_overlap" => {
                         if let Some(d) = details {
-                            if let Some(missing_keywords) = d.get("missing_keywords").and_then(|v| v.as_array()) {
+                            if let Some(missing_keywords) =
+                                d.get("missing_keywords").and_then(|v| v.as_array())
+                            {
                                 if !missing_keywords.is_empty() {
                                     let keywords: Vec<String> = missing_keywords
                                         .iter()
@@ -97,7 +109,10 @@ pub fn generate_recommendations(
                                         .collect();
                                     recommendations.push(
                                         Recommendation::new("Include more job-specific keywords")
-                                            .with_reason(format!("Missing important keywords: {}", keywords.join(", ")))
+                                            .with_reason(format!(
+                                                "Missing important keywords: {}",
+                                                keywords.join(", ")
+                                            )),
                                     );
                                 }
                             }
@@ -121,14 +136,14 @@ pub fn generate_recommendations(
                 // Moderate scores - give lighter recommendations
                 match name {
                     "impact" => {
-                        recommendations.push(
-                            Recommendation::new("Consider adding more quantifiable metrics to strengthen your impact")
-                        );
+                        recommendations.push(Recommendation::new(
+                            "Consider adding more quantifiable metrics to strengthen your impact",
+                        ));
                     }
                     "keyword_overlap" => {
-                        recommendations.push(
-                            Recommendation::new("Review job description for additional keywords to include")
-                        );
+                        recommendations.push(Recommendation::new(
+                            "Review job description for additional keywords to include",
+                        ));
                     }
                     _ => {}
                 }

@@ -31,8 +31,11 @@
 //! }
 //! ```
 
+use crate::anthropic::{AnthropicClient, GenerationConfig as AnthropicGenerationConfig};
 use crate::error::{AtsError, Result};
-use crate::gemini::{GeminiClient, GenerationConfig};
+use crate::gemini::{GeminiClient, GenerationConfig as GeminiGenerationConfig};
+use crate::llama::{GenerationConfig as LlamaGenerationConfig, LlamaClient};
+use crate::openai::{GenerationConfig as OpenAiGenerationConfig, OpenAiClient};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -294,7 +297,7 @@ impl GeminiAgent {
     ///
     /// Returns an error if the `GEMINI_API_KEY` environment variable is not set.
     pub fn from_env(config: AgentConfig) -> Result<Self> {
-        let generation_config = GenerationConfig {
+        let generation_config = GeminiGenerationConfig {
             temperature: Some(config.temperature),
             top_p: Some(config.top_p),
             top_k: Some(config.top_k),
@@ -313,7 +316,7 @@ impl GeminiAgent {
     ///
     /// Returns an error if the API key is invalid or the model name is not supported.
     pub fn new(api_key: impl Into<String>, config: AgentConfig) -> Result<Self> {
-        let generation_config = GenerationConfig {
+        let generation_config = GeminiGenerationConfig {
             temperature: Some(config.temperature),
             top_p: Some(config.top_p),
             top_k: Some(config.top_k),
@@ -414,6 +417,408 @@ impl Agent for GeminiAgent {
 }
 
 // -------------------------
+// OpenAI Agent Implementation
+// -------------------------
+
+/// OpenAI-based agent implementation.
+pub struct OpenAiAgent {
+    config: AgentConfig,
+    client: OpenAiClient,
+}
+
+impl OpenAiAgent {
+    /// Create a new OpenAI agent from environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `OPENAI_API_KEY` environment variable is not set.
+    pub fn from_env(config: AgentConfig) -> Result<Self> {
+        let generation_config = OpenAiGenerationConfig {
+            temperature: Some(config.temperature),
+            top_p: Some(config.top_p),
+            max_tokens: Some(config.max_output_tokens),
+        };
+
+        let client = OpenAiClient::from_env_with_model(&config.model_name)?
+            .with_generation_config(generation_config);
+
+        Ok(Self { config, client })
+    }
+
+    /// Create a new OpenAI agent with explicit API key.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API key is invalid.
+    pub fn new(api_key: impl Into<String>, config: AgentConfig) -> Result<Self> {
+        let generation_config = OpenAiGenerationConfig {
+            temperature: Some(config.temperature),
+            top_p: Some(config.top_p),
+            max_tokens: Some(config.max_output_tokens),
+        };
+
+        let client = OpenAiClient::new(api_key, &config.model_name)?
+            .with_generation_config(generation_config);
+
+        Ok(Self { config, client })
+    }
+
+    /// Generate text with retry logic.
+    async fn generate_with_retry(&self, prompt: &str) -> Result<String> {
+        let mut last_error = None;
+        let max_attempts = 1 + self.config.max_retries.max(0);
+
+        for attempt in 0..max_attempts {
+            match self.client.generate_content(prompt).await {
+                Ok(text) => {
+                    if self.config.retry_on_empty && text.trim().is_empty() {
+                        last_error = Some(AtsError::ApiResponse {
+                            message: "Empty response from API".to_string(),
+                            status_code: None,
+                        });
+                        continue;
+                    }
+
+                    return Ok(text);
+                }
+                Err(e) => {
+                    last_error = Some(e);
+
+                    // Don't retry on auth errors
+                    if matches!(last_error, Some(AtsError::ApiAuth { .. })) {
+                        break;
+                    }
+
+                    // Add small delay before retry
+                    if attempt < max_attempts - 1 {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| AtsError::ApiRequest {
+            message: "All retry attempts failed".to_string(),
+            source: None,
+        }))
+    }
+}
+
+#[async_trait]
+impl Agent for OpenAiAgent {
+    fn config(&self) -> &AgentConfig {
+        &self.config
+    }
+
+    async fn generate_text(&self, prompt: &str) -> Result<String> {
+        let text = self.generate_with_retry(prompt).await?;
+
+        // If require_json is set, validate it's valid JSON
+        if self.config.require_json {
+            let cleaned = strip_markdown_fences(&text);
+            serde_json::from_str::<serde_json::Value>(&cleaned).map_err(|e| {
+                AtsError::ApiResponse {
+                    message: format!("Response is not valid JSON: {e}"),
+                    status_code: None,
+                }
+            })?;
+
+            // Return cleaned JSON
+            return Ok(cleaned);
+        }
+
+        Ok(text)
+    }
+
+    async fn generate_json(&self, prompt: &str) -> Result<serde_json::Value> {
+        // Add JSON instruction to prompt if not already present
+        let enhanced_prompt = if prompt.to_lowercase().contains("json") {
+            prompt.to_string()
+        } else {
+            format!(
+                "{prompt}\n\nIMPORTANT: Output MUST be a raw JSON object only. No markdown fences. No commentary."
+            )
+        };
+
+        let text = self.generate_with_retry(&enhanced_prompt).await?;
+        let cleaned = strip_markdown_fences(&text);
+
+        serde_json::from_str(&cleaned).map_err(|e| AtsError::ApiResponse {
+            message: format!("Failed to parse JSON: {e}"),
+            status_code: None,
+        })
+    }
+}
+
+// -------------------------
+// Anthropic Agent Implementation
+// -------------------------
+
+/// Anthropic Claude-based agent implementation.
+pub struct AnthropicAgent {
+    config: AgentConfig,
+    client: AnthropicClient,
+}
+
+impl AnthropicAgent {
+    /// Create a new Anthropic agent from environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `ANTHROPIC_API_KEY` environment variable is not set.
+    pub fn from_env(config: AgentConfig) -> Result<Self> {
+        let generation_config = AnthropicGenerationConfig {
+            temperature: Some(config.temperature),
+            top_p: Some(config.top_p),
+            top_k: Some(config.top_k),
+            max_tokens: Some(config.max_output_tokens),
+        };
+
+        let client = AnthropicClient::from_env_with_model(&config.model_name)?
+            .with_generation_config(generation_config);
+
+        Ok(Self { config, client })
+    }
+
+    /// Create a new Anthropic agent with explicit API key.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API key is invalid.
+    pub fn new(api_key: impl Into<String>, config: AgentConfig) -> Result<Self> {
+        let generation_config = AnthropicGenerationConfig {
+            temperature: Some(config.temperature),
+            top_p: Some(config.top_p),
+            top_k: Some(config.top_k),
+            max_tokens: Some(config.max_output_tokens),
+        };
+
+        let client = AnthropicClient::new(api_key, &config.model_name)?
+            .with_generation_config(generation_config);
+
+        Ok(Self { config, client })
+    }
+
+    /// Generate text with retry logic.
+    async fn generate_with_retry(&self, prompt: &str) -> Result<String> {
+        let mut last_error = None;
+        let max_attempts = 1 + self.config.max_retries.max(0);
+
+        for attempt in 0..max_attempts {
+            match self.client.generate_content(prompt).await {
+                Ok(text) => {
+                    if self.config.retry_on_empty && text.trim().is_empty() {
+                        last_error = Some(AtsError::ApiResponse {
+                            message: "Empty response from API".to_string(),
+                            status_code: None,
+                        });
+                        continue;
+                    }
+
+                    return Ok(text);
+                }
+                Err(e) => {
+                    last_error = Some(e);
+
+                    // Don't retry on auth errors
+                    if matches!(last_error, Some(AtsError::ApiAuth { .. })) {
+                        break;
+                    }
+
+                    // Add small delay before retry
+                    if attempt < max_attempts - 1 {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| AtsError::ApiRequest {
+            message: "All retry attempts failed".to_string(),
+            source: None,
+        }))
+    }
+}
+
+#[async_trait]
+impl Agent for AnthropicAgent {
+    fn config(&self) -> &AgentConfig {
+        &self.config
+    }
+
+    async fn generate_text(&self, prompt: &str) -> Result<String> {
+        let text = self.generate_with_retry(prompt).await?;
+
+        // If require_json is set, validate it's valid JSON
+        if self.config.require_json {
+            let cleaned = strip_markdown_fences(&text);
+            serde_json::from_str::<serde_json::Value>(&cleaned).map_err(|e| {
+                AtsError::ApiResponse {
+                    message: format!("Response is not valid JSON: {e}"),
+                    status_code: None,
+                }
+            })?;
+
+            // Return cleaned JSON
+            return Ok(cleaned);
+        }
+
+        Ok(text)
+    }
+
+    async fn generate_json(&self, prompt: &str) -> Result<serde_json::Value> {
+        // Add JSON instruction to prompt if not already present
+        let enhanced_prompt = if prompt.to_lowercase().contains("json") {
+            prompt.to_string()
+        } else {
+            format!(
+                "{prompt}\n\nIMPORTANT: Output MUST be a raw JSON object only. No markdown fences. No commentary."
+            )
+        };
+
+        let text = self.generate_with_retry(&enhanced_prompt).await?;
+        let cleaned = strip_markdown_fences(&text);
+
+        serde_json::from_str(&cleaned).map_err(|e| AtsError::ApiResponse {
+            message: format!("Failed to parse JSON: {e}"),
+            status_code: None,
+        })
+    }
+}
+
+// -------------------------
+// Llama Agent Implementation
+// -------------------------
+
+/// Llama (Ollama) based agent implementation.
+pub struct LlamaAgent {
+    config: AgentConfig,
+    client: LlamaClient,
+}
+
+impl LlamaAgent {
+    /// Create a new Llama agent with the specified model.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model name is empty or the client cannot be created.
+    pub fn new(config: AgentConfig) -> Result<Self> {
+        let generation_config = LlamaGenerationConfig {
+            temperature: Some(config.temperature),
+            top_p: Some(config.top_p),
+            top_k: Some(config.top_k),
+            num_predict: Some(config.max_output_tokens),
+        };
+
+        let client =
+            LlamaClient::new(&config.model_name)?.with_generation_config(generation_config);
+
+        Ok(Self { config, client })
+    }
+
+    /// Create a new Llama agent with a specific host.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model name is empty.
+    pub fn with_host(config: AgentConfig, host: impl Into<String>) -> Result<Self> {
+        let generation_config = LlamaGenerationConfig {
+            temperature: Some(config.temperature),
+            top_p: Some(config.top_p),
+            top_k: Some(config.top_k),
+            num_predict: Some(config.max_output_tokens),
+        };
+
+        let client = LlamaClient::new(&config.model_name)?
+            .with_host(host)
+            .with_generation_config(generation_config);
+
+        Ok(Self { config, client })
+    }
+
+    /// Generate text with retry logic.
+    async fn generate_with_retry(&self, prompt: &str) -> Result<String> {
+        let mut last_error = None;
+        let max_attempts = 1 + self.config.max_retries.max(0);
+
+        for attempt in 0..max_attempts {
+            match self.client.generate_content(prompt).await {
+                Ok(text) => {
+                    if self.config.retry_on_empty && text.trim().is_empty() {
+                        last_error = Some(AtsError::ApiResponse {
+                            message: "Empty response from API".to_string(),
+                            status_code: None,
+                        });
+                        continue;
+                    }
+
+                    return Ok(text);
+                }
+                Err(e) => {
+                    last_error = Some(e);
+
+                    // Add small delay before retry
+                    if attempt < max_attempts - 1 {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| AtsError::ApiRequest {
+            message: "All retry attempts failed".to_string(),
+            source: None,
+        }))
+    }
+}
+
+#[async_trait]
+impl Agent for LlamaAgent {
+    fn config(&self) -> &AgentConfig {
+        &self.config
+    }
+
+    async fn generate_text(&self, prompt: &str) -> Result<String> {
+        let text = self.generate_with_retry(prompt).await?;
+
+        // If require_json is set, validate it's valid JSON
+        if self.config.require_json {
+            let cleaned = strip_markdown_fences(&text);
+            serde_json::from_str::<serde_json::Value>(&cleaned).map_err(|e| {
+                AtsError::ApiResponse {
+                    message: format!("Response is not valid JSON: {e}"),
+                    status_code: None,
+                }
+            })?;
+
+            // Return cleaned JSON
+            return Ok(cleaned);
+        }
+
+        Ok(text)
+    }
+
+    async fn generate_json(&self, prompt: &str) -> Result<serde_json::Value> {
+        // Add JSON instruction to prompt if not already present
+        let enhanced_prompt = if prompt.to_lowercase().contains("json") {
+            prompt.to_string()
+        } else {
+            format!(
+                "{prompt}\n\nIMPORTANT: Output MUST be a raw JSON object only. No markdown fences. No commentary."
+            )
+        };
+
+        let text = self.generate_with_retry(&enhanced_prompt).await?;
+        let cleaned = strip_markdown_fences(&text);
+
+        serde_json::from_str(&cleaned).map_err(|e| AtsError::ApiResponse {
+            message: format!("Failed to parse JSON: {e}"),
+            status_code: None,
+        })
+    }
+}
+
+// -------------------------
 // Agent Registry
 // -------------------------
 
@@ -451,7 +856,10 @@ impl AgentRegistry {
 
     /// List all agent names.
     pub fn list(&self) -> Vec<&str> {
-        self.agents.keys().map(std::string::String::as_str).collect()
+        self.agents
+            .keys()
+            .map(std::string::String::as_str)
+            .collect()
     }
 
     /// Remove an agent from the registry.
@@ -489,9 +897,12 @@ impl AgentRegistry {
         for (name, config) in agents_config {
             let agent: Box<dyn Agent> = match config.provider.as_str() {
                 "gemini" => Box::new(GeminiAgent::from_env(config.clone())?),
+                "openai" => Box::new(OpenAiAgent::from_env(config.clone())?),
+                "anthropic" | "claude" => Box::new(AnthropicAgent::from_env(config.clone())?),
+                "llama" | "ollama" => Box::new(LlamaAgent::new(config.clone())?),
                 other => {
                     return Err(AtsError::NotSupported {
-                        message: format!("Provider '{other}' not yet supported"),
+                        message: format!("Provider '{other}' not supported"),
                     })
                 }
             };

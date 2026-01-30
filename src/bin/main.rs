@@ -65,15 +65,13 @@ async fn main() {
             resume,
             job,
             weights,
-        }) => {
-            match handlers::handle_score_match(&resume, &job, weights.as_deref(), &config) {
-                Ok(code) => code,
-                Err(e) => {
-                    eprintln!("Error scoring match: {}", e);
-                    1
-                }
+        }) => match handlers::handle_score_match(&resume, &job, weights.as_deref(), &config) {
+            Ok(code) => code,
+            Err(e) => {
+                eprintln!("Error scoring match: {}", e);
+                1
             }
-        }
+        },
 
         // Rank jobs subcommand
         Some(ats_checker::cli::Commands::RankJobs { results, top }) => {

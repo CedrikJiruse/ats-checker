@@ -1,5 +1,5 @@
-use ats_checker::processor::IterationStrategy;
 use ats_checker::error::Result;
+use ats_checker::processor::IterationStrategy;
 
 mod common;
 

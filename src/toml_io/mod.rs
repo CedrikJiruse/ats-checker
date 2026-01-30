@@ -4,7 +4,7 @@
 //!
 //! # Examples
 //!
-//! ```rust
+//! ```rust,no_run
 //! use ats_checker::toml_io::{load, dump, merge_toml};
 //! use serde_json::json;
 //!

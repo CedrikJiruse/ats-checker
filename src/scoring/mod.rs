@@ -242,7 +242,9 @@ pub fn load_overall_iteration_weights(weights_path: Option<&str>) -> HashMap<Str
 /// Normalize weights to sum to 1.0.
 ///
 /// Ignores non-positive weights. If all weights are <= 0, returns 0 for all.
-pub fn normalize_weights<S: std::hash::BuildHasher>(weights: &HashMap<String, f64, S>) -> HashMap<String, f64> {
+pub fn normalize_weights<S: std::hash::BuildHasher>(
+    weights: &HashMap<String, f64, S>,
+) -> HashMap<String, f64> {
     let positive: HashMap<String, f64> = weights
         .iter()
         .filter(|(_, &v)| v > 0.0)
@@ -884,10 +886,12 @@ fn score_match_keyword_overlap(
     resume: &serde_json::Value,
     job: &serde_json::Value,
 ) -> (f64, HashMap<String, serde_json::Value>) {
-    let job_text = [safe_str(job.get("title")),
+    let job_text = [
+        safe_str(job.get("title")),
         safe_str(job.get("description")),
         safe_str(job.get("company")),
-        safe_str(job.get("location"))]
+        safe_str(job.get("location")),
+    ]
     .join(" ");
 
     let resume_text = resume_as_text(resume);

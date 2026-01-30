@@ -50,9 +50,8 @@ pub fn validate_json(
     schema: &serde_json::Value,
 ) -> Result<ValidationResult> {
     // Compile the schema
-    let validator = Validator::new(schema).map_err(|e| {
-        AtsError::internal(format!("Failed to compile JSON schema: {e}"))
-    })?;
+    let validator = Validator::new(schema)
+        .map_err(|e| AtsError::internal(format!("Failed to compile JSON schema: {e}")))?;
 
     // Validate the instance
     if validator.is_valid(instance) {

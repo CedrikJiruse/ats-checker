@@ -11,8 +11,7 @@ fn test_hash_calculation_basic() {
     let content = "Hello, world!";
     let file_path = create_test_file(temp_dir.path(), "test.txt", content);
 
-    let hash = calculate_file_hash(&file_path)
-        .expect("Failed to calculate hash");
+    let hash = calculate_file_hash(&file_path).expect("Failed to calculate hash");
 
     // Hash should be a 64-character hex string (SHA256)
     assert_eq!(hash.len(), 64);
@@ -58,8 +57,7 @@ fn test_hash_large_file() {
     let file_path = create_test_file(temp_dir.path(), "large.txt", &content);
 
     // Should successfully hash large file
-    let hash = calculate_file_hash(&file_path)
-        .expect("Failed to hash large file");
+    let hash = calculate_file_hash(&file_path).expect("Failed to hash large file");
 
     assert_eq!(hash.len(), 64);
 }
@@ -70,14 +68,16 @@ fn test_hash_empty_file() {
     let file_path = create_test_file(temp_dir.path(), "empty.txt", "");
 
     // Should successfully hash empty file
-    let hash = calculate_file_hash(&file_path)
-        .expect("Failed to hash empty file");
+    let hash = calculate_file_hash(&file_path).expect("Failed to hash empty file");
 
     assert_eq!(hash.len(), 64);
 
     // Empty file should have a specific hash
     // SHA256 of empty string is e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-    assert_eq!(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    assert_eq!(
+        hash,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
 }
 
 #[test]
@@ -96,8 +96,7 @@ fn test_hash_unicode_content() {
     let content = "Hello 世界 🌍 مرحبا";
     let file_path = create_test_file(temp_dir.path(), "unicode.txt", content);
 
-    let hash = calculate_file_hash(&file_path)
-        .expect("Failed to hash file with unicode");
+    let hash = calculate_file_hash(&file_path).expect("Failed to hash file with unicode");
 
     assert_eq!(hash.len(), 64);
 }

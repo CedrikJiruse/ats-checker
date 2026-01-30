@@ -19,7 +19,9 @@ fn test_cli_score_resume_command() {
     let cli = Cli::try_parse_from(args).unwrap();
 
     match cli.command {
-        Some(Commands::ScoreResume { resume, weights, .. }) => {
+        Some(Commands::ScoreResume {
+            resume, weights, ..
+        }) => {
             assert_eq!(resume, "test.toml");
             assert_eq!(weights.unwrap(), "weights.toml");
         }

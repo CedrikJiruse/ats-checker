@@ -225,7 +225,10 @@ fn test_atomic_write_to_readonly_directory() {
 
         // Try to write - should fail gracefully
         let result = atomic_write(&file_path, "new content");
-        assert!(result.is_err(), "Should fail to write to readonly directory");
+        assert!(
+            result.is_err(),
+            "Should fail to write to readonly directory"
+        );
 
         // Restore permissions for cleanup
         let mut perms = fs::metadata(temp_dir.path()).unwrap().permissions();
@@ -274,7 +277,10 @@ fn test_resume_with_unicode_and_special_characters() {
     });
 
     let result = score_resume(&resume, None);
-    assert!(result.is_ok(), "Should handle Unicode and special characters");
+    assert!(
+        result.is_ok(),
+        "Should handle Unicode and special characters"
+    );
 }
 
 #[test]
@@ -454,8 +460,5 @@ async fn test_concurrent_errors_dont_corrupt_state() {
 
     // State file should still be readable
     let result = StateManager::new(state_file);
-    assert!(
-        result.is_ok(),
-        "State should remain valid despite errors"
-    );
+    assert!(result.is_ok(), "State should remain valid despite errors");
 }

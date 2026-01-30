@@ -86,5 +86,10 @@ fn bench_match_scoring(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_resume_scoring, bench_job_scoring, bench_match_scoring);
+criterion_group!(
+    benches,
+    bench_resume_scoring,
+    bench_job_scoring,
+    bench_match_scoring
+);
 criterion_main!(benches);

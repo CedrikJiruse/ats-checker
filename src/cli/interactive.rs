@@ -5,12 +5,13 @@ use crate::error::Result;
 use crate::input::InputHandler;
 
 use crate::processor::ResumeProcessor;
+use crate::scraper::{cache::CacheConfig, retry::RetryConfig};
 use crate::scraper::{
     jobspy::JobSpyScraper, CacheWrapper, JobScraperManager, RetryWrapper, SavedSearch,
     SavedSearchManager, SearchFilters,
 };
-use crate::scraper::{cache::CacheConfig, retry::RetryConfig};
 use crate::state::StateManager;
+use crate::utils::file::sanitize_filename;
 use crate::utils::ocr::{check_tesseract_installed, extract_text_from_image};
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -286,7 +287,9 @@ async fn process_resumes_menu(config: &Config) -> Result<()> {
             let job_path = job_path.trim();
 
             println!("\nProcessing {resume_path} with job {job_path}...");
-            let result = processor.process_resume(resume_path, Some(job_path)).await?;
+            let result = processor
+                .process_resume(resume_path, Some(job_path))
+                .await?;
 
             if result.success {
                 println!("\n✓ Resume processed successfully!");
@@ -310,10 +313,7 @@ async fn process_resumes_menu(config: &Config) -> Result<()> {
     Ok(())
 }
 
-async fn select_resume_interactive(
-    config: &Config,
-    processor: &mut ResumeProcessor,
-) -> Result<()> {
+async fn select_resume_interactive(config: &Config, processor: &mut ResumeProcessor) -> Result<()> {
     let input_handler = InputHandler::new(
         config.input_resumes_folder.clone(),
         config.job_descriptions_folder.clone(),
@@ -322,7 +322,10 @@ async fn select_resume_interactive(
     let resumes = input_handler.list_resumes()?;
 
     if resumes.is_empty() {
-        println!("\nNo resumes found in {}", config.input_resumes_folder.display());
+        println!(
+            "\nNo resumes found in {}",
+            config.input_resumes_folder.display()
+        );
         return Ok(());
     }
 
@@ -476,7 +479,10 @@ async fn new_job_search(results_folder: &PathBuf, saved_searches_path: &PathBuf)
 
     println!("\nSearching for jobs...");
     let available_scrapers = manager.available_sources();
-    match manager.search_jobs(&filters, &available_scrapers, max_results).await {
+    match manager
+        .search_jobs(&filters, &available_scrapers, max_results)
+        .await
+    {
         Ok(jobs) => {
             println!("\n✓ Found {} jobs", jobs.len());
 
@@ -534,10 +540,7 @@ fn view_saved_searches(saved_searches_path: &PathBuf) -> Result<()> {
                     .keywords
                     .as_ref()
                     .map_or("(none)", |k| k.as_str());
-                let last_run = search
-                    .last_run
-                    .as_ref()
-                    .map_or("Never", |d| d.as_str());
+                let last_run = search.last_run.as_ref().map_or("Never", |d| d.as_str());
                 println!(
                     "  {}. {} (keywords: {}, last run: {})",
                     i + 1,
@@ -552,10 +555,7 @@ fn view_saved_searches(saved_searches_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-async fn run_saved_search(
-    results_folder: &PathBuf,
-    saved_searches_path: &PathBuf,
-) -> Result<()> {
+async fn run_saved_search(results_folder: &PathBuf, saved_searches_path: &PathBuf) -> Result<()> {
     let manager = SavedSearchManager::new(saved_searches_path)?;
     let searches = manager.list();
 
@@ -585,8 +585,9 @@ async fn run_saved_search(
 
             // Get the saved search and run it
             if let Some(saved_search) = manager.get(name) {
-                let mut scraper_manager = JobScraperManager::new(results_folder, saved_searches_path)?;
-                
+                let mut scraper_manager =
+                    JobScraperManager::new(results_folder, saved_searches_path)?;
+
                 // Register available scrapers
                 let sources = vec!["linkedin", "indeed", "glassdoor", "google", "ziprecruiter"];
                 let retry_config = RetryConfig::default();
@@ -596,19 +597,23 @@ async fn run_saved_search(
                     if let Ok(scraper) = JobSpyScraper::new(source) {
                         if scraper.check_dependencies().is_ok() {
                             let retry_scraper = RetryWrapper::new(scraper, retry_config.clone());
-                            let cached_scraper = CacheWrapper::new(retry_scraper, cache_config.clone());
+                            let cached_scraper =
+                                CacheWrapper::new(retry_scraper, cache_config.clone());
                             scraper_manager.register_scraper(Box::new(cached_scraper));
                         }
                     }
                 }
-                
+
                 let available_scrapers = scraper_manager.available_sources();
                 if available_scrapers.is_empty() {
                     println!("\n⚠ No scrapers available.");
                     return Ok(());
                 }
-                
-                match scraper_manager.search_jobs(&saved_search.filters, &available_scrapers, 50).await {
+
+                match scraper_manager
+                    .search_jobs(&saved_search.filters, &available_scrapers, 50)
+                    .await
+                {
                     Ok(jobs) => {
                         println!("\n✓ Found {} jobs", jobs.len());
                         // Update last run timestamp
@@ -663,7 +668,11 @@ fn create_saved_search(saved_searches_path: &PathBuf) -> Result<()> {
     }
     filters.remote_only = remote_only;
 
-    let search = SavedSearch::new(name, filters, vec!["linkedin".to_string(), "indeed".to_string()]);
+    let search = SavedSearch::new(
+        name,
+        filters,
+        vec!["linkedin".to_string(), "indeed".to_string()],
+    );
 
     let mut manager = SavedSearchManager::new(saved_searches_path)?;
     manager.save(search)?;
@@ -716,7 +725,10 @@ fn delete_saved_search(saved_searches_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn export_jobs_to_descriptions(jobs: &[crate::scraper::JobPosting], folder: &PathBuf) -> Result<i32> {
+fn export_jobs_to_descriptions(
+    jobs: &[crate::scraper::JobPosting],
+    folder: &PathBuf,
+) -> Result<i32> {
     use std::fs;
     use std::io::Write;
 
@@ -724,17 +736,16 @@ fn export_jobs_to_descriptions(jobs: &[crate::scraper::JobPosting], folder: &Pat
     let mut count = 0;
 
     for job in jobs {
-        let filename = format!("{}_{}.txt", sanitize_filename(&job.company), sanitize_filename(&job.title));
+        let filename = format!(
+            "{}_{}.txt",
+            sanitize_filename(&job.company),
+            sanitize_filename(&job.title)
+        );
         let filepath = folder.join(&filename);
 
         let content = format!(
             "Title: {}\nCompany: {}\nLocation: {}\nSource: {}\nURL: {}\n\nDescription:\n{}\n",
-            job.title,
-            job.company,
-            job.location,
-            job.source,
-            job.url,
-            job.description
+            job.title, job.company, job.location, job.source, job.url, job.description
         );
 
         let mut file = fs::File::create(&filepath)?;
@@ -743,13 +754,6 @@ fn export_jobs_to_descriptions(jobs: &[crate::scraper::JobPosting], folder: &Pat
     }
 
     Ok(count)
-}
-
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| if c.is_alphanumeric() || c == ' ' { c } else { '_' })
-        .collect::<String>()
-        .replace(' ', "_")
 }
 
 // -------------------------
@@ -821,7 +825,10 @@ fn view_config(config: &Config) {
     );
     println!("  Output: {}", config.output_folder.display());
     println!("  State file: {}", config.state_file.display());
-    println!("  Scoring weights: {}", config.scoring_weights_file.display());
+    println!(
+        "  Scoring weights: {}",
+        config.scoring_weights_file.display()
+    );
 
     println!("\nProcessing:");
     println!("  Versions per job: {}", config.num_versions_per_job);

@@ -72,8 +72,14 @@ pub fn format_resume_scores(scores: &Value) -> String {
     // Add category scores
     if let Some(categories) = scores.get("categories").and_then(|v| v.as_object()) {
         for (category, data) in categories {
-            let score = data.get("score").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-            let weight = data.get("weight").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+            let score = data
+                .get("score")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
+            let weight = data
+                .get("weight")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0);
             let weighted = score * weight;
 
             table.add_row(vec![
@@ -81,10 +87,8 @@ pub fn format_resume_scores(scores: &Value) -> String {
                 Cell::new(format!("{score:.1}"))
                     .set_alignment(CellAlignment::Right)
                     .fg(get_score_color(score)),
-                Cell::new(format!("{:.0}%", weight * 100.0))
-                    .set_alignment(CellAlignment::Right),
-                Cell::new(format!("{weighted:.1}"))
-                    .set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.0}%", weight * 100.0)).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{weighted:.1}")).set_alignment(CellAlignment::Right),
             ]);
         }
     }
@@ -119,7 +123,10 @@ pub fn format_match_scores(match_scores: &Value) -> String {
         ]);
 
     // Add overall match score
-    if let Some(overall) = match_scores.get("overall").and_then(serde_json::Value::as_f64) {
+    if let Some(overall) = match_scores
+        .get("overall")
+        .and_then(serde_json::Value::as_f64)
+    {
         table.add_row(vec![
             Cell::new("OVERALL MATCH")
                 .add_attribute(Attribute::Bold)
@@ -139,7 +146,9 @@ pub fn format_match_scores(match_scores: &Value) -> String {
             let score = if data.is_number() {
                 data.as_f64().unwrap_or(0.0)
             } else {
-                data.get("score").and_then(serde_json::Value::as_f64).unwrap_or(0.0)
+                data.get("score")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(0.0)
             };
 
             table.add_row(vec![
@@ -190,26 +199,33 @@ pub fn format_job_rankings(jobs: &[Value], top_n: usize) -> String {
                 .fg(Color::Cyan),
         ]);
 
-    let display_count = if top_n == 0 { jobs.len() } else { top_n.min(jobs.len()) };
+    let display_count = if top_n == 0 {
+        jobs.len()
+    } else {
+        top_n.min(jobs.len())
+    };
 
     for (rank, job) in jobs.iter().take(display_count).enumerate() {
-        let title = job.get("title")
+        let title = job
+            .get("title")
             .and_then(|v| v.as_str())
             .unwrap_or("Unknown");
-        let company = job.get("company")
+        let company = job
+            .get("company")
             .and_then(|v| v.as_str())
             .unwrap_or("Unknown");
-        let score = job.get("score")
+        let score = job
+            .get("score")
             .or_else(|| job.get("match_score"))
             .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.0);
-        let location = job.get("location")
+        let location = job
+            .get("location")
             .and_then(|v| v.as_str())
             .unwrap_or("Remote");
 
         table.add_row(vec![
-            Cell::new(format!("#{}", rank + 1))
-                .set_alignment(CellAlignment::Center),
+            Cell::new(format!("#{}", rank + 1)).set_alignment(CellAlignment::Center),
             Cell::new(truncate_string(title, 40)),
             Cell::new(truncate_string(company, 25)),
             Cell::new(format!("{score:.1}"))
@@ -220,11 +236,12 @@ pub fn format_job_rankings(jobs: &[Value], top_n: usize) -> String {
     }
 
     if jobs.len() > display_count {
-        table.add_row(vec![
-            Cell::new(format!("... {} more jobs", jobs.len() - display_count))
-                .add_attribute(Attribute::Italic)
-                .fg(Color::DarkGrey),
-        ]);
+        table.add_row(vec![Cell::new(format!(
+            "... {} more jobs",
+            jobs.len() - display_count
+        ))
+        .add_attribute(Attribute::Italic)
+        .fg(Color::DarkGrey)]);
     }
 
     table.to_string()
@@ -276,18 +293,17 @@ pub fn format_resume_list(resumes: &[String], with_status: Option<&[String]>) ->
             .unwrap_or(resume);
 
         if let Some(statuses) = with_status {
-            let status = statuses.get(idx).map_or("Unknown", std::string::String::as_str);
+            let status = statuses
+                .get(idx)
+                .map_or("Unknown", std::string::String::as_str);
             table.add_row(vec![
-                Cell::new(format!("{}", idx + 1))
-                    .set_alignment(CellAlignment::Right),
+                Cell::new(format!("{}", idx + 1)).set_alignment(CellAlignment::Right),
                 Cell::new(resume_name),
-                Cell::new(status)
-                    .fg(get_status_color(status)),
+                Cell::new(status).fg(get_status_color(status)),
             ]);
         } else {
             table.add_row(vec![
-                Cell::new(format!("{}", idx + 1))
-                    .set_alignment(CellAlignment::Right),
+                Cell::new(format!("{}", idx + 1)).set_alignment(CellAlignment::Right),
                 Cell::new(resume_name),
             ]);
         }
@@ -321,8 +337,7 @@ pub fn format_recommendations(recommendations: &[String]) -> String {
 
     for (idx, rec) in recommendations.iter().enumerate() {
         table.add_row(vec![
-            Cell::new(format!("{}", idx + 1))
-                .set_alignment(CellAlignment::Right),
+            Cell::new(format!("{}", idx + 1)).set_alignment(CellAlignment::Right),
             Cell::new(rec),
         ]);
     }
@@ -463,10 +478,7 @@ mod tests {
 
     #[test]
     fn test_format_resume_list() {
-        let resumes = vec![
-            "resume1.txt".to_string(),
-            "resume2.pdf".to_string(),
-        ];
+        let resumes = vec!["resume1.txt".to_string(), "resume2.pdf".to_string()];
 
         let table = format_resume_list(&resumes, None);
         assert!(table.contains("resume1"));
@@ -475,10 +487,7 @@ mod tests {
 
     #[test]
     fn test_format_resume_list_with_status() {
-        let resumes = vec![
-            "resume1.txt".to_string(),
-            "resume2.pdf".to_string(),
-        ];
+        let resumes = vec!["resume1.txt".to_string(), "resume2.pdf".to_string()];
         let statuses = vec!["Processed".to_string(), "Pending".to_string()];
 
         let table = format_resume_list(&resumes, Some(&statuses));

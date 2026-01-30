@@ -18,7 +18,11 @@ use std::path::Path;
 /// - The resume file cannot be read or parsed
 /// - The weights file cannot be loaded
 /// - Scoring fails
-pub fn handle_score_resume(resume_path: &str, weights_path: Option<&str>, config: &Config) -> Result<i32> {
+pub fn handle_score_resume(
+    resume_path: &str,
+    weights_path: Option<&str>,
+    config: &Config,
+) -> Result<i32> {
     log::info!("Scoring resume: {resume_path}");
 
     // Determine weights file path
@@ -48,9 +52,7 @@ pub fn handle_score_resume(resume_path: &str, weights_path: Option<&str>, config
         serde_json::to_value(toml_value)
             .map_err(|e| AtsError::internal(format!("Failed to convert TOML to JSON: {e}")))?
     } else {
-        return Err(AtsError::internal(
-            "Resume file must be .json or .toml",
-        ));
+        return Err(AtsError::internal("Resume file must be .json or .toml"));
     };
 
     // Score the resume
@@ -130,9 +132,7 @@ pub fn handle_score_match(
         serde_json::to_value(toml_value)
             .map_err(|e| AtsError::internal(format!("Failed to convert TOML to JSON: {e}")))?
     } else {
-        return Err(AtsError::internal(
-            "Resume file must be .json or .toml",
-        ));
+        return Err(AtsError::internal("Resume file must be .json or .toml"));
     };
 
     // Load job description
@@ -264,8 +264,15 @@ pub fn handle_rank_jobs(results_path: &str, top: i32, config: &Config) -> Result
     println!("\n{}", "=".repeat(80));
     println!("TOP {top} JOBS (sorted by score)");
     println!("{}", "=".repeat(80));
-    println!("\n{}", table::format_job_rankings(&jobs_for_table, top as usize));
-    println!("\nTotal jobs: {} | Showing top: {}", jobs.len(), top.min(jobs.len() as i32));
+    println!(
+        "\n{}",
+        table::format_job_rankings(&jobs_for_table, top as usize)
+    );
+    println!(
+        "\nTotal jobs: {} | Showing top: {}",
+        jobs.len(),
+        top.min(jobs.len() as i32)
+    );
     println!("{}", "=".repeat(80));
 
     Ok(0)
@@ -293,11 +300,8 @@ pub async fn handle_job_search(
     config: &Config,
 ) -> Result<i32> {
     use crate::scraper::{
-        jobspy::JobSpyScraper,
-        CacheConfig, CacheWrapper,
-        JobScraperManager,
-        RetryConfig, RetryWrapper,
-        SearchFilters
+        jobspy::JobSpyScraper, CacheConfig, CacheWrapper, JobScraperManager, RetryConfig,
+        RetryWrapper, SearchFilters,
     };
     use std::time::Duration;
 
@@ -370,7 +374,9 @@ pub async fn handle_job_search(
     println!("   Max results per source: {max_results}\n");
 
     let source_names: Vec<&str> = sources.iter().map(String::as_str).collect();
-    let jobs = manager.search_jobs(&filters, &source_names, max_results).await?;
+    let jobs = manager
+        .search_jobs(&filters, &source_names, max_results)
+        .await?;
 
     if jobs.is_empty() {
         println!("No jobs found matching your criteria.");
@@ -405,10 +411,16 @@ pub async fn handle_job_search(
     println!("{}", "=".repeat(80));
     println!("JOB SEARCH RESULTS");
     println!("{}", "=".repeat(80));
-    println!("\n{}", table::format_job_rankings(&jobs_json, jobs.len().min(20)));
+    println!(
+        "\n{}",
+        table::format_job_rankings(&jobs_json, jobs.len().min(20))
+    );
 
     if jobs.len() > 20 {
-        println!("\n... and {} more jobs (see full results in output file)", jobs.len() - 20);
+        println!(
+            "\n... and {} more jobs (see full results in output file)",
+            jobs.len() - 20
+        );
     }
 
     println!("\n{}", "=".repeat(80));

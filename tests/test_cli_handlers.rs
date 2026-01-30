@@ -20,11 +20,7 @@ fn test_handle_score_resume_with_json() {
         &serde_json::to_string_pretty(&sample_resume_json()).unwrap(),
     );
 
-    let weights_path = create_test_file(
-        temp_dir.path(),
-        "weights.toml",
-        sample_scoring_weights(),
-    );
+    let weights_path = create_test_file(temp_dir.path(), "weights.toml", sample_scoring_weights());
 
     let config_path = create_test_file(temp_dir.path(), "config.toml", sample_config_toml());
 
@@ -56,11 +52,7 @@ fn test_handle_score_resume_with_toml() {
         &toml::to_string_pretty(&resume_value).unwrap(),
     );
 
-    let weights_path = create_test_file(
-        temp_dir.path(),
-        "weights.toml",
-        sample_scoring_weights(),
-    );
+    let weights_path = create_test_file(temp_dir.path(), "weights.toml", sample_scoring_weights());
 
     let config_path = create_test_file(temp_dir.path(), "config.toml", sample_config_toml());
 
@@ -116,17 +108,9 @@ fn test_handle_score_match() {
         &serde_json::to_string_pretty(&sample_resume_json()).unwrap(),
     );
 
-    let job_path = create_test_file(
-        temp_dir.path(),
-        "job.txt",
-        sample_job_description(),
-    );
+    let job_path = create_test_file(temp_dir.path(), "job.txt", sample_job_description());
 
-    let weights_path = create_test_file(
-        temp_dir.path(),
-        "weights.toml",
-        sample_scoring_weights(),
-    );
+    let weights_path = create_test_file(temp_dir.path(), "weights.toml", sample_scoring_weights());
 
     let config_path = create_test_file(temp_dir.path(), "config.toml", sample_config_toml());
 
@@ -204,11 +188,7 @@ source = "Glassdoor"
 
     let results_path = create_test_file(temp_dir.path(), "results.toml", results_toml);
 
-    let weights_path = create_test_file(
-        temp_dir.path(),
-        "weights.toml",
-        sample_scoring_weights(),
-    );
+    let weights_path = create_test_file(temp_dir.path(), "weights.toml", sample_scoring_weights());
 
     let config_path = create_test_file(temp_dir.path(), "config.toml", sample_config_toml());
     let mut config = Config::load(config_path.to_str().unwrap()).unwrap();
@@ -234,11 +214,7 @@ jobs = []
 
     let results_path = create_test_file(temp_dir.path(), "results.toml", results_toml);
 
-    let weights_path = create_test_file(
-        temp_dir.path(),
-        "weights.toml",
-        sample_scoring_weights(),
-    );
+    let weights_path = create_test_file(temp_dir.path(), "weights.toml", sample_scoring_weights());
 
     let config_path = create_test_file(temp_dir.path(), "config.toml", sample_config_toml());
     let mut config = Config::load(config_path.to_str().unwrap()).unwrap();
@@ -302,11 +278,7 @@ source = "Indeed"
 
     let results_path = create_test_file(temp_dir.path(), "results.toml", results_toml);
 
-    let weights_path = create_test_file(
-        temp_dir.path(),
-        "weights.toml",
-        sample_scoring_weights(),
-    );
+    let weights_path = create_test_file(temp_dir.path(), "weights.toml", sample_scoring_weights());
 
     let config_path = create_test_file(temp_dir.path(), "config.toml", sample_config_toml());
     let mut config = Config::load(config_path.to_str().unwrap()).unwrap();

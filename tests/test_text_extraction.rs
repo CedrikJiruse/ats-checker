@@ -14,8 +14,7 @@ fn test_extract_text_from_txt() {
     let file_path = create_test_file(temp_dir.path(), "resume.txt", content);
 
     // Extract text
-    let extracted = extract_text_from_file(&file_path)
-        .expect("Failed to extract text from TXT");
+    let extracted = extract_text_from_file(&file_path).expect("Failed to extract text from TXT");
 
     // Verify content matches
     assert_eq!(extracted, content);
@@ -30,8 +29,7 @@ fn test_extract_text_from_md() {
     let file_path = create_test_file(temp_dir.path(), "resume.md", content);
 
     // Extract text
-    let extracted = extract_text_from_file(&file_path)
-        .expect("Failed to extract text from MD");
+    let extracted = extract_text_from_file(&file_path).expect("Failed to extract text from MD");
 
     // Verify content matches (markdown is read as plain text)
     assert_eq!(extracted, content);
@@ -49,8 +47,7 @@ John Doe - Software Engineer
     let file_path = create_test_file(temp_dir.path(), "resume.tex", content);
 
     // Extract text
-    let extracted = extract_text_from_file(&file_path)
-        .expect("Failed to extract text from TEX");
+    let extracted = extract_text_from_file(&file_path).expect("Failed to extract text from TEX");
 
     // Verify content matches (TeX is read as plain text)
     assert_eq!(extracted, content);
@@ -73,8 +70,7 @@ fn test_extract_text_handles_utf8() {
 
     let file_path = create_test_file(temp_dir.path(), "resume_utf8.txt", content);
 
-    let extracted = extract_text_from_file(&file_path)
-        .expect("Failed to extract UTF-8 text");
+    let extracted = extract_text_from_file(&file_path).expect("Failed to extract UTF-8 text");
 
     assert_eq!(extracted, content);
 }

@@ -44,8 +44,11 @@ fn test_config_state_input_integration() {
     std::fs::create_dir_all(&config.input_resumes_folder).unwrap();
     std::fs::create_dir_all(&config.job_descriptions_folder).unwrap();
 
-    let resume_path =
-        create_test_file(&config.input_resumes_folder, "test_resume.txt", sample_resume_text());
+    let resume_path = create_test_file(
+        &config.input_resumes_folder,
+        "test_resume.txt",
+        sample_resume_text(),
+    );
 
     // Initialize StateManager
     let mut state = StateManager::new(&config.state_file).unwrap();
@@ -58,14 +61,19 @@ fn test_config_state_input_integration() {
 
     // Add to state
     let output_path = temp_dir.path().join("output/test_resume.toml");
-    state.update_resume_state(&file_hash, output_path.to_str().unwrap()).unwrap();
+    state
+        .update_resume_state(&file_hash, output_path.to_str().unwrap())
+        .unwrap();
 
     // Verify state now has the file
     let resume_state = state.get_resume_state(&file_hash).unwrap();
     assert_eq!(resume_state.output_path, output_path.to_str().unwrap());
 
     // Initialize InputHandler
-    let input_handler = InputHandler::new(&config.input_resumes_folder, &config.job_descriptions_folder);
+    let input_handler = InputHandler::new(
+        &config.input_resumes_folder,
+        &config.job_descriptions_folder,
+    );
 
     // List resume files
     let resume_files = input_handler.list_resumes().unwrap();
@@ -79,11 +87,7 @@ fn test_scoring_and_output_integration() {
     let temp_dir = create_temp_dir();
 
     // Create weights file
-    let weights_path = create_test_file(
-        temp_dir.path(),
-        "weights.toml",
-        sample_scoring_weights(),
-    );
+    let weights_path = create_test_file(temp_dir.path(), "weights.toml", sample_scoring_weights());
 
     // Create resume JSON
     let resume_json = sample_resume_json();
@@ -163,7 +167,9 @@ fn test_scoring_and_output_integration() {
     assert!(entries.len() >= 2);
 
     // Find and verify JSON file exists
-    let json_file = entries.iter().find(|p| p.extension().is_some_and(|ext| ext == "json"));
+    let json_file = entries
+        .iter()
+        .find(|p| p.extension().is_some_and(|ext| ext == "json"));
     assert!(json_file.is_some());
 
     // Verify JSON content can be read back
@@ -194,11 +200,7 @@ fn test_full_component_integration() {
     std::fs::create_dir_all(&config.job_descriptions_folder).unwrap();
 
     // Create weights file
-    create_test_file(
-        temp_dir.path(),
-        "weights.toml",
-        sample_scoring_weights(),
-    );
+    create_test_file(temp_dir.path(), "weights.toml", sample_scoring_weights());
 
     // 2. Initialize StateManager
     let mut state = StateManager::new(&config.state_file).unwrap();
@@ -215,7 +217,10 @@ fn test_full_component_integration() {
     assert!(state.get_resume_state(&file_hash).is_none());
 
     // 5. Initialize InputHandler and list files
-    let input_handler = InputHandler::new(&config.input_resumes_folder, &config.job_descriptions_folder);
+    let input_handler = InputHandler::new(
+        &config.input_resumes_folder,
+        &config.job_descriptions_folder,
+    );
     let resume_files = input_handler.list_resumes().unwrap();
     assert_eq!(resume_files.len(), 1);
 
@@ -254,7 +259,9 @@ fn test_full_component_integration() {
     let result_dir = output_generator.generate(&output_data).unwrap();
 
     // 10. Update state with output directory path
-    state.update_resume_state(&file_hash, result_dir.to_str().unwrap()).unwrap();
+    state
+        .update_resume_state(&file_hash, result_dir.to_str().unwrap())
+        .unwrap();
 
     // 11. Verify state was updated
     let resume_state = state.get_resume_state(&file_hash).unwrap();
@@ -269,16 +276,15 @@ fn test_full_component_integration() {
         .map(|e| e.unwrap().path())
         .collect();
 
-    let json_file = entries.iter().find(|p| p.extension().is_some_and(|ext| ext == "json"));
+    let json_file = entries
+        .iter()
+        .find(|p| p.extension().is_some_and(|ext| ext == "json"));
     assert!(json_file.is_some());
 
     let output_content = std::fs::read_to_string(json_file.unwrap()).unwrap();
     let output_json: serde_json::Value = serde_json::from_str(&output_content).unwrap();
 
-    assert_eq!(
-        output_json["personal_info"]["name"],
-        "John Doe"
-    );
+    assert_eq!(output_json["personal_info"]["name"], "John Doe");
 }
 
 #[test]
@@ -301,11 +307,7 @@ fn test_multi_file_processing_workflow() {
     std::fs::create_dir_all(&config.input_resumes_folder).unwrap();
     std::fs::create_dir_all(&config.job_descriptions_folder).unwrap();
 
-    create_test_file(
-        temp_dir.path(),
-        "weights.toml",
-        sample_scoring_weights(),
-    );
+    create_test_file(temp_dir.path(), "weights.toml", sample_scoring_weights());
 
     let mut state = StateManager::new(&config.state_file).unwrap();
 
@@ -329,7 +331,10 @@ fn test_multi_file_processing_workflow() {
     );
 
     // List all resumes
-    let input_handler = InputHandler::new(&config.input_resumes_folder, &config.job_descriptions_folder);
+    let input_handler = InputHandler::new(
+        &config.input_resumes_folder,
+        &config.job_descriptions_folder,
+    );
     let resume_files = input_handler.list_resumes().unwrap();
 
     assert_eq!(resume_files.len(), 3);
@@ -348,15 +353,13 @@ fn test_multi_file_processing_workflow() {
         assert!(!content.is_empty());
 
         // Simulate processing
-        let stem = resume_path
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let stem = resume_path.file_stem().unwrap().to_str().unwrap();
         let output_path = config.output_folder.join(stem);
 
         // Update state
-        state.update_resume_state(&file_hash, output_path.to_str().unwrap()).unwrap();
+        state
+            .update_resume_state(&file_hash, output_path.to_str().unwrap())
+            .unwrap();
     }
 
     // Verify all files are now in state

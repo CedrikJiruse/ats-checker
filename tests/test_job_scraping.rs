@@ -41,14 +41,35 @@ async fn test_job_posting_with_builder() {
 
 #[tokio::test]
 async fn test_job_posting_id_generation() {
-    let job1 = JobPosting::new("Title", "Company", "Location", "Desc", "https://url1.com", "src");
-    let job2 = JobPosting::new("Title", "Company", "Location", "Desc", "https://url2.com", "src");
+    let job1 = JobPosting::new(
+        "Title",
+        "Company",
+        "Location",
+        "Desc",
+        "https://url1.com",
+        "src",
+    );
+    let job2 = JobPosting::new(
+        "Title",
+        "Company",
+        "Location",
+        "Desc",
+        "https://url2.com",
+        "src",
+    );
 
     // Different URLs should generate different IDs
     assert_ne!(job1.id(), job2.id());
 
     // Same URL should generate same ID
-    let job3 = JobPosting::new("Title", "Company", "Location", "Desc", "https://url1.com", "src");
+    let job3 = JobPosting::new(
+        "Title",
+        "Company",
+        "Location",
+        "Desc",
+        "https://url1.com",
+        "src",
+    );
     assert_eq!(job1.id(), job3.id());
 }
 
@@ -68,14 +89,26 @@ async fn test_search_filters_builder() {
 
 #[tokio::test]
 async fn test_job_source_parsing() {
-    assert_eq!(JobSource::from_str("linkedin").unwrap(), JobSource::LinkedIn);
+    assert_eq!(
+        JobSource::from_str("linkedin").unwrap(),
+        JobSource::LinkedIn
+    );
     assert_eq!(JobSource::from_str("indeed").unwrap(), JobSource::Indeed);
-    assert_eq!(JobSource::from_str("glassdoor").unwrap(), JobSource::Glassdoor);
+    assert_eq!(
+        JobSource::from_str("glassdoor").unwrap(),
+        JobSource::Glassdoor
+    );
     assert_eq!(JobSource::from_str("google").unwrap(), JobSource::Google);
-    assert_eq!(JobSource::from_str("ziprecruiter").unwrap(), JobSource::ZipRecruiter);
+    assert_eq!(
+        JobSource::from_str("ziprecruiter").unwrap(),
+        JobSource::ZipRecruiter
+    );
 
     // Test case insensitivity
-    assert_eq!(JobSource::from_str("LinkedIn").unwrap(), JobSource::LinkedIn);
+    assert_eq!(
+        JobSource::from_str("LinkedIn").unwrap(),
+        JobSource::LinkedIn
+    );
     assert_eq!(JobSource::from_str("INDEED").unwrap(), JobSource::Indeed);
 }
 
@@ -108,9 +141,7 @@ async fn test_search_filters_is_empty() {
     let empty_filters = SearchFilters::default();
     assert!(empty_filters.is_empty());
 
-    let non_empty_filters = SearchFilters::builder()
-        .keywords("rust")
-        .build();
+    let non_empty_filters = SearchFilters::builder().keywords("rust").build();
     assert!(!non_empty_filters.is_empty());
 }
 
@@ -136,8 +167,15 @@ fn test_job_posting_remote_check() {
 
 #[tokio::test]
 async fn test_job_posting_metadata() {
-    let job = JobPosting::new("Title", "Company", "Location", "Desc", "https://url.com", "src")
-        .with_metadata("test_key", serde_json::json!({"nested": "value"}));
+    let job = JobPosting::new(
+        "Title",
+        "Company",
+        "Location",
+        "Desc",
+        "https://url.com",
+        "src",
+    )
+    .with_metadata("test_key", serde_json::json!({"nested": "value"}));
 
     assert!(job.metadata.contains_key("test_key"));
     assert_eq!(
@@ -149,9 +187,30 @@ async fn test_job_posting_metadata() {
 #[tokio::test]
 async fn test_multiple_job_postings() {
     let jobs = [
-        JobPosting::new("Job 1", "Co 1", "Loc 1", "Desc 1", "https://url1.com", "linkedin"),
-        JobPosting::new("Job 2", "Co 2", "Loc 2", "Desc 2", "https://url2.com", "indeed"),
-        JobPosting::new("Job 3", "Co 3", "Loc 3", "Desc 3", "https://url3.com", "glassdoor"),
+        JobPosting::new(
+            "Job 1",
+            "Co 1",
+            "Loc 1",
+            "Desc 1",
+            "https://url1.com",
+            "linkedin",
+        ),
+        JobPosting::new(
+            "Job 2",
+            "Co 2",
+            "Loc 2",
+            "Desc 2",
+            "https://url2.com",
+            "indeed",
+        ),
+        JobPosting::new(
+            "Job 3",
+            "Co 3",
+            "Loc 3",
+            "Desc 3",
+            "https://url3.com",
+            "glassdoor",
+        ),
     ];
 
     assert_eq!(jobs.len(), 3);

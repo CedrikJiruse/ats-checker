@@ -113,7 +113,11 @@ impl<S: JobScraper> CacheWrapper<S> {
     fn cache_key(&self, filters: &SearchFilters, max_results: i32) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.inner.name().as_bytes());
-        hasher.update(serde_json::to_string(filters).unwrap_or_default().as_bytes());
+        hasher.update(
+            serde_json::to_string(filters)
+                .unwrap_or_default()
+                .as_bytes(),
+        );
         hasher.update(max_results.to_string().as_bytes());
         hex::encode(&hasher.finalize()[..16])
     }
@@ -172,11 +176,7 @@ impl<S: JobScraper> CacheWrapper<S> {
         let ttl = self.config.ttl;
         let expired = cache
             .as_ref()
-            .map_or(0, |c| {
-                c.values()
-                    .filter(|e| e.is_expired(ttl))
-                    .count()
-            });
+            .map_or(0, |c| c.values().filter(|e| e.is_expired(ttl)).count());
 
         CacheStats {
             total_entries,
@@ -226,11 +226,13 @@ impl<S: JobScraper> CacheWrapper<S> {
 
     /// Get the cache file path.
     fn get_cache_file_path(&self) -> Result<PathBuf> {
-        let cache_dir = self.config.cache_dir.as_ref().ok_or_else(|| {
-            AtsError::CacheError {
+        let cache_dir = self
+            .config
+            .cache_dir
+            .as_ref()
+            .ok_or_else(|| AtsError::CacheError {
                 message: "Cache directory not configured".to_string(),
-            }
-        })?;
+            })?;
 
         let filename = format!("scraper_cache_{}.json", self.inner.name());
         Ok(cache_dir.join(filename))

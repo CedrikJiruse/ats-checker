@@ -25,6 +25,9 @@
 //! - [`recommendations`] - Improvement recommendations generation
 //! - [`validation`] - JSON Schema validation
 //! - [`gemini`] - Gemini API integration
+//! - [`openai`] - OpenAI API integration
+//! - [`anthropic`] - Anthropic Claude API integration
+//! - [`llama`] - Llama (Ollama) API integration
 //!
 //! ## Example
 //!
@@ -67,11 +70,14 @@
 
 // Public modules
 pub mod agents;
+pub mod anthropic;
 pub mod cli;
 pub mod config;
 pub mod error;
 pub mod gemini;
 pub mod input;
+pub mod llama;
+pub mod openai;
 pub mod output;
 pub mod processor;
 pub mod recommendations;
@@ -83,8 +89,12 @@ pub mod utils;
 pub mod validation;
 
 // Re-exports for convenience
+pub use anthropic::AnthropicClient;
 pub use config::Config;
 pub use error::{AtsError, Result};
+pub use gemini::GeminiClient;
+pub use llama::LlamaClient;
+pub use openai::OpenAiClient;
 pub use output::{OutputData, OutputGenerator, OutputManifest};
 pub use processor::ResumeProcessor;
 pub use recommendations::Recommendation;

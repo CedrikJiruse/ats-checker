@@ -61,12 +61,14 @@ impl JobSpyScraper {
     ///
     /// Returns an error if the source is invalid.
     pub fn new(source: impl AsRef<str>) -> Result<Self> {
-        let source: JobSource = source.as_ref().parse().map_err(|e: String| {
-            AtsError::ScraperError {
-                message: e,
-                source: None,
-            }
-        })?;
+        let source: JobSource =
+            source
+                .as_ref()
+                .parse()
+                .map_err(|e: String| AtsError::ScraperError {
+                    message: e,
+                    source: None,
+                })?;
 
         Ok(Self {
             source,
@@ -189,12 +191,11 @@ impl JobSpyScraper {
 
         // Parse JSON output
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let json_value: Value = serde_json::from_str(&stdout).map_err(|e| {
-            AtsError::ScraperError {
+        let json_value: Value =
+            serde_json::from_str(&stdout).map_err(|e| AtsError::ScraperError {
                 message: format!("Failed to parse JobSpy output: {e}"),
                 source: Some(Box::new(e)),
-            }
-        })?;
+            })?;
 
         // Convert to JobPosting objects
         self.parse_jobspy_results(&json_value)
@@ -262,10 +263,12 @@ except Exception as e:
 
     /// Parse `JobSpy` results from JSON into `JobPosting` objects.
     fn parse_jobspy_results(&self, json_value: &Value) -> Result<Vec<JobPosting>> {
-        let jobs_array = json_value.as_array().ok_or_else(|| AtsError::ScraperError {
-            message: "Expected JSON array from JobSpy".to_string(),
-            source: None,
-        })?;
+        let jobs_array = json_value
+            .as_array()
+            .ok_or_else(|| AtsError::ScraperError {
+                message: "Expected JSON array from JobSpy".to_string(),
+                source: None,
+            })?;
 
         let mut results = Vec::new();
 
@@ -315,11 +318,7 @@ except Exception as e:
             let is_remote = job_obj
                 .get("is_remote")
                 .and_then(serde_json::Value::as_bool)
-                .or_else(|| {
-                    job_obj
-                        .get("remote")
-                        .and_then(serde_json::Value::as_bool)
-                });
+                .or_else(|| job_obj.get("remote").and_then(serde_json::Value::as_bool));
             let experience_level = job_obj
                 .get("experience_level")
                 .or_else(|| job_obj.get("seniority_level"))
