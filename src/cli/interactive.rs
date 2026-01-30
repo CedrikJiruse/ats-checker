@@ -80,6 +80,7 @@ pub async fn run_interactive_menu(config: Config) -> Result<()> {
     ctrlc::set_handler(move || {
         r.store(false, Ordering::SeqCst);
         println!("\n\nReceived interrupt signal. Cleaning up...");
+        std::process::exit(0);
     })
     .expect("Error setting Ctrl-C handler");
 

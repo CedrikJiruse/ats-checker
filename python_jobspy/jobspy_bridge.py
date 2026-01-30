@@ -39,7 +39,12 @@ Output JSON format:
 
 import json
 import sys
+import warnings
 from typing import Dict, List, Any, Optional
+
+# Suppress numpy warnings on Windows MINGW-W64
+warnings.filterwarnings("ignore", message="Numpy built with MINGW-W64")
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 try:
     from jobspy import scrape_jobs

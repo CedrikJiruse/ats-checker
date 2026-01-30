@@ -37,8 +37,11 @@ use crate::scoring::{score_match, score_resume, ScoreReport};
 use crate::state::StateManager;
 use crate::utils::hash::calculate_file_hash;
 use crate::validation::validate_json;
+use futures::stream::{self, StreamExt};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 // -------------------------
 // Data Structures
@@ -533,37 +536,93 @@ impl ResumeProcessor {
         }
     }
 
-    /// Process all new resumes in the input folder.
+    /// Process all new resumes in the input folder in parallel.
+    ///
+    /// Uses a semaphore to limit concurrent processing based on `max_concurrent_requests` config.
     ///
     /// # Errors
     ///
     /// Returns an error if the input folder cannot be read or listing resumes fails.
     pub async fn process_all_resumes(&mut self) -> Result<Vec<ProcessingResult>> {
         let resume_paths = self.input_handler.list_new_resumes(&self.state_manager)?;
-        let mut results = Vec::new();
+
+        if resume_paths.is_empty() {
+            log::info!("No new resumes to process");
+            return Ok(vec![]);
+        }
 
         log::info!("Found {} resumes to process", resume_paths.len());
 
-        for resume_path in resume_paths {
-            log::info!("Processing: {}", resume_path.display());
+        // Create semaphore to limit concurrent processing
+        let max_concurrent = self.config.max_concurrent_requests.max(1) as usize;
+        let semaphore = Arc::new(Semaphore::new(max_concurrent));
+        log::info!("Processing with max {max_concurrent} concurrent requests");
 
-            match self
-                .process_resume(&resume_path.display().to_string(), None)
-                .await
-            {
-                Ok(result) => results.push(result),
-                Err(e) => {
-                    log::error!("Failed to process {}: {}", resume_path.display(), e);
-                    results.push(ProcessingResult {
-                        success: false,
-                        output_dir: None,
-                        scores: None,
-                        enhanced_resume: None,
-                        recommendations: vec![],
-                        error: Some(e.to_string()),
-                    });
+        // Clone necessary data for parallel processing
+        let config = Arc::new(self.config.clone());
+        let state_manager = Arc::new(tokio::sync::Mutex::new(std::mem::replace(
+            &mut self.state_manager,
+            StateManager::new(self.config.state_file.clone())?,
+        )));
+        let input_handler = self.input_handler.clone();
+        let output_generator = self.output_generator.clone();
+        let agent_registry = Arc::new(self.agent_registry.clone());
+
+        // Process resumes in parallel using stream with buffer_unordered
+        let results: Vec<ProcessingResult> = stream::iter(resume_paths)
+            .map(|resume_path| {
+                let semaphore = Arc::clone(&semaphore);
+                let config = Arc::clone(&config);
+                let state_manager = Arc::clone(&state_manager);
+                let input_handler = input_handler.clone();
+                let output_generator = output_generator.clone();
+                let agent_registry = Arc::clone(&agent_registry);
+                let resume_path_str = resume_path.display().to_string();
+
+                async move {
+                    // Acquire semaphore permit to limit concurrency
+                    let _permit = semaphore
+                        .acquire()
+                        .await
+                        .expect("Semaphore should not be closed");
+                    log::info!("Processing: {resume_path_str}");
+
+                    // Process the resume using a standalone processor
+                    let standalone_processor = StandaloneProcessor::new(
+                        Arc::clone(&config),
+                        Arc::clone(&state_manager),
+                        input_handler.clone(),
+                        output_generator.clone(),
+                        Arc::clone(&agent_registry),
+                    );
+
+                    let result = standalone_processor
+                        .process_resume(&resume_path_str, None)
+                        .await;
+
+                    match result {
+                        Ok(processing_result) => processing_result,
+                        Err(e) => {
+                            log::error!("Failed to process {resume_path_str}: {e}");
+                            ProcessingResult {
+                                success: false,
+                                output_dir: None,
+                                scores: None,
+                                enhanced_resume: None,
+                                recommendations: vec![],
+                                error: Some(e.to_string()),
+                            }
+                        }
+                    }
                 }
-            }
+            })
+            .buffer_unordered(max_concurrent)
+            .collect()
+            .await;
+
+        // Restore state_manager
+        if let Ok(sm) = Arc::try_unwrap(state_manager) {
+            self.state_manager = sm.into_inner();
         }
 
         Ok(results)
@@ -643,6 +702,371 @@ impl ResumeProcessor {
         );
 
         agent.generate_json(&prompt).await
+    }
+}
+
+// -------------------------
+// Standalone Processor for Parallel Execution
+// -------------------------
+
+/// Standalone processor for processing resumes in parallel.
+///
+/// This struct holds Arc references to shared resources and can process
+/// resumes without requiring mutable access, making it suitable for
+/// concurrent execution.
+pub struct StandaloneProcessor {
+    config: Arc<Config>,
+    state_manager: Arc<tokio::sync::Mutex<StateManager>>,
+    input_handler: InputHandler,
+    output_generator: OutputGenerator,
+    agent_registry: Arc<AgentRegistry>,
+}
+
+impl StandaloneProcessor {
+    /// Create a new standalone processor.
+    pub fn new(
+        config: Arc<Config>,
+        state_manager: Arc<tokio::sync::Mutex<StateManager>>,
+        input_handler: InputHandler,
+        output_generator: OutputGenerator,
+        agent_registry: Arc<AgentRegistry>,
+    ) -> Self {
+        Self {
+            config,
+            state_manager,
+            input_handler,
+            output_generator,
+            agent_registry,
+        }
+    }
+
+    /// Process a single resume.
+    ///
+    /// This is the internal implementation that can be called in parallel.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the resume file cannot be read, AI enhancement fails,
+    /// scoring fails, or output generation fails.
+    pub async fn process_resume(
+        &self,
+        resume_path: &str,
+        job_path: Option<&str>,
+    ) -> Result<ProcessingResult> {
+        let resume_file = Path::new(resume_path);
+
+        // Step 1: Calculate hash and check if already processed
+        let resume_hash = calculate_file_hash(resume_file)?;
+        {
+            let state_manager = self.state_manager.lock().await;
+            if state_manager.is_processed(&resume_hash) {
+                log::info!("Resume already processed (hash: {resume_hash}), skipping");
+                return Ok(ProcessingResult {
+                    success: true,
+                    output_dir: None,
+                    scores: None,
+                    enhanced_resume: None,
+                    recommendations: vec![],
+                    error: None,
+                });
+            }
+        }
+
+        // Step 2: Load resume text
+        log::info!("Loading resume from: {resume_path}");
+        let resume_text = self.input_handler.load_resume(resume_file)?;
+
+        // Step 3: Load job description (optional)
+        let job_text = if let Some(jp) = job_path {
+            log::info!("Loading job description from: {jp}");
+            Some(self.input_handler.load_job_description(Path::new(jp))?)
+        } else {
+            None
+        };
+
+        // Step 4: Enhance resume using AI
+        log::info!("Enhancing resume with AI...");
+        let enhanced_resume = self
+            .enhance_resume(&resume_text, job_text.as_deref())
+            .await?;
+
+        // Step 5: Validate schema (if enabled)
+        if self.config.schema_validation_enabled {
+            log::info!("Validating enhanced resume against schema...");
+            let schema_content =
+                std::fs::read_to_string(&self.config.resume_schema_path).map_err(|e| {
+                    AtsError::io(
+                        format!(
+                            "Failed to read schema file: {}",
+                            self.config.resume_schema_path.display()
+                        ),
+                        e,
+                    )
+                })?;
+            let schema: serde_json::Value = serde_json::from_str(&schema_content)
+                .map_err(|e| AtsError::internal(format!("Failed to parse schema JSON: {e}")))?;
+
+            let validation = validate_json(&enhanced_resume, &schema)?;
+            if !validation.ok {
+                log::warn!("Schema validation failed: {:?}", validation.errors);
+            }
+        }
+
+        // Step 6: Score the enhanced resume
+        log::info!("Scoring enhanced resume...");
+        let weights_path = self.config.scoring_weights_file.to_str();
+        let resume_score = score_resume(&enhanced_resume, weights_path)?;
+
+        // Step 7: Score match if job description provided
+        let match_score = if let Some(job_txt) = &job_text {
+            log::info!("Scoring resume-job match...");
+            let job_json = serde_json::json!({
+                "description": job_txt,
+                "raw_text": job_txt
+            });
+            Some(score_match(&enhanced_resume, &job_json, weights_path)?)
+        } else {
+            None
+        };
+
+        // Step 8: Combine scores for overall evaluation
+        let combined_score = if let Some(ms) = &match_score {
+            f64::midpoint(resume_score.total, ms.total)
+        } else {
+            resume_score.total
+        };
+
+        // Step 9: Iterate to improve scores (if enabled)
+        let (final_resume, final_resume_score, _final_match_score) =
+            if self.config.iterate_until_score_reached && combined_score < self.config.target_score
+            {
+                log::info!(
+                    "Iterating to improve scores (current: {:.2}, target: {:.2})...",
+                    combined_score,
+                    self.config.target_score
+                );
+                self.iterate_improvement(
+                    &resume_text,
+                    job_text.as_deref(),
+                    enhanced_resume,
+                    resume_score,
+                    match_score,
+                )
+                .await?
+            } else {
+                (enhanced_resume, resume_score, match_score)
+            };
+
+        // Step 10: Generate recommendations (if enabled)
+        let recommendations = if self.config.recommendations_enabled {
+            log::info!("Generating recommendations...");
+            let score_json = serde_json::to_value(&final_resume_score).map_err(|e| {
+                AtsError::internal(format!("Failed to serialize score report: {e}"))
+            })?;
+            generate_recommendations(&score_json, self.config.recommendations_max_items as usize)
+        } else {
+            vec![]
+        };
+
+        // Step 11: Prepare output data
+        let resume_name = resume_file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("resume")
+            .to_string();
+
+        let job_title = job_path.and_then(|jp| {
+            Path::new(jp)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(std::string::ToString::to_string)
+        });
+
+        let output_data = OutputData {
+            resume_name: resume_name.clone(),
+            job_title: job_title.clone(),
+            enhanced_resume: final_resume.clone(),
+            scores: Some(final_resume_score.clone()),
+            recommendations: recommendations.clone(),
+            metadata: HashMap::new(),
+        };
+
+        // Step 12: Generate outputs
+        log::info!("Writing outputs...");
+        let output_dir = self.output_generator.generate(&output_data)?;
+
+        // Step 13: Update state
+        {
+            let mut state_manager = self.state_manager.lock().await;
+            state_manager.update_resume_state(&resume_hash, &output_dir.display().to_string())?;
+        }
+
+        log::info!("Resume processing completed successfully!");
+        Ok(ProcessingResult {
+            success: true,
+            output_dir: Some(output_dir),
+            scores: Some(final_resume_score),
+            enhanced_resume: Some(final_resume),
+            recommendations,
+            error: None,
+        })
+    }
+
+    /// Enhance resume using AI agent.
+    async fn enhance_resume(
+        &self,
+        resume_text: &str,
+        job_text: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let agent = self
+            .agent_registry
+            .get("enhancer")
+            .map_err(|_| AtsError::internal("Enhancer agent not found in registry"))?;
+
+        let prompt = if let Some(job) = job_text {
+            format!(
+                "Enhance the following resume for the given job description. \
+                 Return a structured JSON object with fields: name, email, phone, \
+                 location, summary, experience (array), skills (array), education (array), \
+                 certifications (array).\n\n\
+                 RESUME:\n{resume_text}\n\n\
+                 JOB DESCRIPTION:\n{job}"
+            )
+        } else {
+            format!(
+                "Enhance the following resume. Return a structured JSON object with \
+                 fields: name, email, phone, location, summary, experience (array), \
+                 skills (array), education (array), certifications (array).\n\n\
+                 RESUME:\n{resume_text}"
+            )
+        };
+
+        let response = agent.generate_json(&prompt).await?;
+        Ok(response)
+    }
+
+    /// Iterate to improve scores.
+    #[allow(clippy::type_complexity)]
+    async fn iterate_improvement(
+        &self,
+        _resume_text: &str,
+        job_text: Option<&str>,
+        initial_resume: serde_json::Value,
+        initial_resume_score: ScoreReport,
+        initial_match_score: Option<ScoreReport>,
+    ) -> Result<(serde_json::Value, ScoreReport, Option<ScoreReport>)> {
+        let strategy = self
+            .config
+            .iteration_strategy
+            .parse::<IterationStrategy>()?;
+
+        let mut best_resume = initial_resume;
+        let mut best_resume_score = initial_resume_score;
+        let mut best_match_score = initial_match_score;
+        let mut best_combined =
+            self.calculate_combined_score(&best_resume_score, best_match_score.as_ref());
+
+        let mut no_improvement_count = 0;
+
+        let weights_path = self.config.scoring_weights_file.to_str();
+
+        for iteration in 1..=self.config.max_iterations {
+            log::info!("Iteration {}/{}...", iteration, self.config.max_iterations);
+
+            // Generate a revised version
+            let candidate = self
+                .revise_resume(&best_resume, &best_resume_score, job_text)
+                .await?;
+            let candidate_resume_score = score_resume(&candidate, weights_path)?;
+            let candidate_match_score = if job_text.is_some() {
+                let job_json = serde_json::json!({
+                    "description": job_text.unwrap_or(""),
+                    "raw_text": job_text.unwrap_or("")
+                });
+                Some(score_match(&candidate, &job_json, weights_path)?)
+            } else {
+                None
+            };
+
+            let candidate_combined = self
+                .calculate_combined_score(&candidate_resume_score, candidate_match_score.as_ref());
+
+            // Check if improved
+            let improved = candidate_combined > best_combined;
+
+            match strategy {
+                IterationStrategy::FirstHit if candidate_combined >= self.config.target_score => {
+                    return Ok((candidate, candidate_resume_score, candidate_match_score));
+                }
+                IterationStrategy::Patience if !improved => {
+                    no_improvement_count += 1;
+                    if no_improvement_count >= 3 {
+                        log::info!("No improvement for 3 iterations, stopping early");
+                        break;
+                    }
+                }
+                _ => {}
+            }
+
+            if improved {
+                best_resume = candidate;
+                best_resume_score = candidate_resume_score;
+                best_match_score = candidate_match_score;
+                best_combined = candidate_combined;
+                no_improvement_count = 0;
+            }
+        }
+
+        Ok((best_resume, best_resume_score, best_match_score))
+    }
+
+    /// Revise a resume based on feedback.
+    async fn revise_resume(
+        &self,
+        current_resume: &serde_json::Value,
+        current_score: &ScoreReport,
+        job_text: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let agent = self
+            .agent_registry
+            .get("reviser")
+            .map_err(|_| AtsError::internal("Reviser agent not found in registry"))?;
+
+        let current_json = serde_json::to_string_pretty(current_resume)
+            .map_err(|e| AtsError::internal(format!("Failed to serialize resume: {e}")))?;
+
+        let prompt = if let Some(job) = job_text {
+            format!(
+                "Revise the following resume to improve its score. Current score: {:.2}\n\n\
+                 Resume:\n{}\n\n\
+                 Job Description:\n{}\n\n\
+                 Return the revised resume as a JSON object with the same structure.",
+                current_score.total, current_json, job
+            )
+        } else {
+            format!(
+                "Revise the following resume to improve its score. Current score: {:.2}\n\n\
+                 Resume:\n{}\n\n\
+                 Return the revised resume as a JSON object with the same structure.",
+                current_score.total, current_json
+            )
+        };
+
+        let response = agent.generate_json(&prompt).await?;
+        Ok(response)
+    }
+
+    /// Calculate the combined score from resume and match scores.
+    fn calculate_combined_score(
+        &self,
+        resume_score: &ScoreReport,
+        match_score: Option<&ScoreReport>,
+    ) -> f64 {
+        if let Some(ms) = match_score {
+            f64::midpoint(resume_score.total, ms.total)
+        } else {
+            resume_score.total
+        }
     }
 }
 

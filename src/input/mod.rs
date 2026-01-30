@@ -23,6 +23,7 @@ const JOB_EXTENSIONS: &[&str] = &["txt", "md"];
 const OCR_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tiff", "tif", "bmp"];
 
 /// Input handler for resumes and job descriptions.
+#[derive(Debug, Clone)]
 pub struct InputHandler {
     resumes_folder: PathBuf,
     jobs_folder: PathBuf,

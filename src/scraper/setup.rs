@@ -2,10 +2,158 @@
 //!
 //! This module provides automatic detection and installation of Python
 //! and `JobSpy` dependencies required for job scraping.
+//!
+//! This module now uses a project-local Python virtual environment (.venv)
+//! to ensure dependencies are isolated and consistently available.
 
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 use crate::error::{AtsError, Result};
+
+/// Name of the virtual environment directory
+const VENV_DIR: &str = ".venv";
+/// Required Python packages
+const REQUIRED_PACKAGES: &[&str] = &["python-jobspy", "pandas"];
+
+/// Cache for dependency check results to avoid redundant checks
+static DEPENDENCY_CHECK_CACHE: OnceLock<DependencyCheck> = OnceLock::new();
+
+/// Get the path to the virtual environment's Python executable
+fn get_venv_python_path() -> PathBuf {
+    let venv_path = Path::new(VENV_DIR);
+
+    #[cfg(windows)]
+    {
+        venv_path.join("Scripts").join("python.exe")
+    }
+    #[cfg(not(windows))]
+    {
+        venv_path.join("bin").join("python")
+    }
+}
+
+/// Check if the virtual environment exists
+fn venv_exists() -> bool {
+    get_venv_python_path().exists()
+}
+
+/// Create a new virtual environment
+fn create_venv(python_exe: &str) -> Result<()> {
+    println!("Creating Python virtual environment in {VENV_DIR}...");
+
+    let output = Command::new(python_exe)
+        .args(["-m", "venv", VENV_DIR])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| AtsError::ScraperError {
+            message: format!("Failed to create virtual environment: {e}"),
+            source: Some(Box::new(e)),
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AtsError::ScraperError {
+            message: format!("Failed to create virtual environment: {stderr}"),
+            source: None,
+        });
+    }
+
+    println!("Virtual environment created successfully");
+    Ok(())
+}
+
+/// Install packages in the virtual environment
+fn install_packages_in_venv(packages: &[&str]) -> Result<()> {
+    let venv_python = get_venv_python_path();
+
+    // Use the venv Python to run pip as a module (more reliable)
+    let python_exe = if venv_python.exists() {
+        venv_python.to_string_lossy().to_string()
+    } else {
+        return Err(AtsError::ScraperError {
+            message: "Virtual environment Python not found".to_string(),
+            source: None,
+        });
+    };
+
+    println!(
+        "Installing packages in virtual environment: {}",
+        packages.join(", ")
+    );
+
+    for package in packages {
+        print!("  Installing {package}... ");
+        std::io::Write::flush(&mut std::io::stdout()).ok();
+
+        let result = Command::new(&python_exe)
+            .args(["-m", "pip", "install", package, "--quiet"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output();
+
+        match result {
+            Ok(output) => {
+                if output.status.success() {
+                    println!("✓");
+                } else {
+                    println!("✗");
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!(
+                        "    Error: {}",
+                        stderr.lines().next().unwrap_or("Unknown error")
+                    );
+                    return Err(AtsError::ScraperError {
+                        message: format!("Failed to install {package}: {stderr}"),
+                        source: None,
+                    });
+                }
+            }
+            Err(e) => {
+                println!("✗");
+                return Err(AtsError::ScraperError {
+                    message: format!("Failed to run pip for {package}: {e}"),
+                    source: Some(Box::new(e)),
+                });
+            }
+        }
+    }
+
+    println!("All packages installed successfully");
+    Ok(())
+}
+
+/// Check if a package is installed in the virtual environment
+fn check_venv_package(package: &str) -> bool {
+    let venv_python = get_venv_python_path();
+
+    if !venv_python.exists() {
+        return false;
+    }
+
+    // Use -W ignore to suppress numpy warnings on Windows MINGW-W64
+    let output = Command::new(&venv_python)
+        .args(["-W", "ignore", "-c", &format!("import {package}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+
+    matches!(output, Ok(result) if result.status.success())
+}
+
+/// Get the Python executable path to use (venv preferred)
+pub fn get_python_exe() -> String {
+    // Prefer venv Python if it exists
+    let venv_python = get_venv_python_path();
+    if venv_python.exists() {
+        return venv_python.to_string_lossy().to_string();
+    }
+
+    // Fall back to system Python
+    find_python().unwrap_or_else(|| "python".to_string())
+}
 
 /// Information about the Python environment.
 #[derive(Debug, Clone)]
@@ -54,8 +202,21 @@ impl DependencyCheck {
 }
 
 /// Check if Python and required dependencies are available.
+///
+/// This function uses a virtual environment (.venv) to ensure dependencies
+/// are isolated and consistently available. It will automatically create
+/// the venv and install packages if needed.
+///
+/// Results are cached after the first call to avoid redundant checks.
 pub fn check_dependencies() -> DependencyCheck {
-    // First, try to find Python
+    DEPENDENCY_CHECK_CACHE
+        .get_or_init(perform_dependency_check)
+        .clone()
+}
+
+/// Internal function that performs the actual dependency check.
+fn perform_dependency_check() -> DependencyCheck {
+    // First, try to find system Python
     let Some(python_exe) = find_python() else {
         return DependencyCheck {
             python_available: false,
@@ -75,9 +236,42 @@ pub fn check_dependencies() -> DependencyCheck {
         };
     };
 
-    // Check for required packages
-    let has_jobspy = check_python_package(&python_exe, "jobspy");
-    let has_pandas = check_python_package(&python_exe, "pandas");
+    // Check if venv exists, if not create it
+    if !venv_exists() {
+        println!("Virtual environment not found. Creating one...");
+        if let Err(_e) = create_venv(&python_exe) {
+            return DependencyCheck {
+                python_available: true,
+                python_info: Some(PythonInfo {
+                    executable: python_exe.clone(),
+                    version: version.clone(),
+                    has_jobspy: false,
+                    has_pandas: false,
+                }),
+                missing_deps: vec!["Failed to create venv".to_string()],
+                can_auto_install: false,
+            };
+        }
+
+        // Install packages in the new venv
+        if let Err(_e) = install_packages_in_venv(REQUIRED_PACKAGES) {
+            return DependencyCheck {
+                python_available: true,
+                python_info: Some(PythonInfo {
+                    executable: get_venv_python_path().to_string_lossy().to_string(),
+                    version: version.clone(),
+                    has_jobspy: false,
+                    has_pandas: false,
+                }),
+                missing_deps: vec!["Failed to install packages".to_string()],
+                can_auto_install: false,
+            };
+        }
+    }
+
+    // Check for required packages in venv
+    let has_jobspy = check_venv_package("jobspy");
+    let has_pandas = check_venv_package("pandas");
 
     let mut missing_deps = Vec::new();
     if !has_jobspy {
@@ -87,8 +281,12 @@ pub fn check_dependencies() -> DependencyCheck {
         missing_deps.push("pandas".to_string());
     }
 
+    // Get venv Python path
+    let venv_python = get_venv_python_path();
+    let venv_python_str = venv_python.to_string_lossy().to_string();
+
     let python_info = PythonInfo {
-        executable: python_exe.clone(),
+        executable: venv_python_str,
         version,
         has_jobspy,
         has_pandas,
@@ -104,12 +302,36 @@ pub fn check_dependencies() -> DependencyCheck {
 
 /// Find available Python executable.
 fn find_python() -> Option<String> {
-    // Try common Python executable names
+    // On Windows, prefer the 'py' launcher which is more reliable
+    #[cfg(windows)]
+    let candidates = ["py", "python", "python3"];
+    #[cfg(not(windows))]
     let candidates = ["python3", "python", "py"];
 
     for exe in &candidates {
-        if Command::new(exe).arg("--version").output().is_ok() {
-            return Some(exe.to_string());
+        if let Ok(output) = Command::new(exe).arg("--version").output() {
+            if output.status.success() {
+                return Some(exe.to_string());
+            }
+        }
+    }
+
+    // On Windows, try to find Python using the 'where' command
+    #[cfg(windows)]
+    {
+        if let Ok(output) = Command::new("where").arg("python").output() {
+            if output.status.success() {
+                let paths = String::from_utf8_lossy(&output.stdout);
+                for line in paths.lines() {
+                    let path = line.trim();
+                    if !path.is_empty() && !path.contains("WindowsApps") {
+                        // Test if this Python actually works
+                        if Command::new(path).arg("--version").output().is_ok() {
+                            return Some(path.to_string());
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -133,18 +355,6 @@ fn get_python_version(exe: &str) -> Option<String> {
         Some(stderr.trim().to_string())
     } else {
         Some(version.to_string())
-    }
-}
-
-/// Check if a Python package is installed.
-fn check_python_package(exe: &str, package: &str) -> bool {
-    let output = Command::new(exe)
-        .args(["-c", &format!("import {package}")])
-        .output();
-
-    match output {
-        Ok(result) => result.status.success(),
-        Err(_) => false,
     }
 }
 
@@ -209,8 +419,9 @@ pub fn auto_install_deps(python_exe: &str, deps: &[String]) -> Result<()> {
 
 /// Run automatic setup for `JobSpy` dependencies.
 ///
-/// This function checks for Python and required packages, and attempts
-/// to install anything that's missing.
+/// This function checks for Python and required packages using a virtual
+/// environment (.venv). It will automatically create the venv and install
+/// packages if needed.
 ///
 /// # Returns
 ///
@@ -220,6 +431,7 @@ pub fn auto_install_deps(python_exe: &str, deps: &[String]) -> Result<()> {
 ///
 /// Returns an error if:
 /// - Python is not installed
+/// - Virtual environment cannot be created
 /// - Dependencies cannot be installed automatically
 pub fn run_auto_setup() -> Result<()> {
     println!("Checking JobSpy dependencies...");
@@ -228,7 +440,10 @@ pub fn run_auto_setup() -> Result<()> {
 
     if check.is_ready() {
         if let Some(info) = check.python_info {
-            println!("✓ Python {} found", info.version);
+            println!(
+                "✓ Python {} found (using virtual environment)",
+                info.version
+            );
             println!("✓ JobSpy ready");
         }
         return Ok(());
@@ -245,15 +460,22 @@ pub fn run_auto_setup() -> Result<()> {
         });
     }
 
-    // Python found but missing packages
+    // Python found but missing packages - venv should have been created by check_dependencies
+    // but packages may need installation
     if let Some(info) = check.python_info {
-        println!("✓ Python {} found", info.version);
-        println!("✗ Missing dependencies: {}", check.missing_deps.join(", "));
-        println!();
+        if !check.missing_deps.is_empty() {
+            println!(
+                "✓ Python {} found (using virtual environment)",
+                info.version
+            );
+            println!("✗ Missing dependencies: {}", check.missing_deps.join(", "));
+            println!();
 
-        // Try auto-install
-        println!("Attempting automatic installation...");
-        auto_install_deps(&info.executable, &check.missing_deps)?;
+            // Try auto-install in venv
+            println!("Attempting automatic installation in virtual environment...");
+            let packages: Vec<&str> = check.missing_deps.iter().map(String::as_str).collect();
+            install_packages_in_venv(&packages)?;
+        }
     }
 
     Ok(())

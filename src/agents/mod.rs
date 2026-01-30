@@ -39,6 +39,7 @@ use crate::openai::{GenerationConfig as OpenAiGenerationConfig, OpenAiClient};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // -------------------------
 // Agent Configuration
@@ -823,8 +824,17 @@ impl Agent for LlamaAgent {
 // -------------------------
 
 /// Agent registry for managing multiple agents.
+#[derive(Clone)]
 pub struct AgentRegistry {
-    agents: HashMap<String, Box<dyn Agent>>,
+    agents: HashMap<String, Arc<dyn Agent>>,
+}
+
+impl std::fmt::Debug for AgentRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentRegistry")
+            .field("agents", &self.agents.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 impl AgentRegistry {
@@ -836,7 +846,7 @@ impl AgentRegistry {
     }
 
     /// Register an agent.
-    pub fn register(&mut self, name: impl Into<String>, agent: Box<dyn Agent>) {
+    pub fn register(&mut self, name: impl Into<String>, agent: Arc<dyn Agent>) {
         self.agents.insert(name.into(), agent);
     }
 
@@ -845,10 +855,10 @@ impl AgentRegistry {
     /// # Errors
     ///
     /// Returns an error if no agent with the given name is registered.
-    pub fn get(&self, name: &str) -> Result<&dyn Agent> {
+    pub fn get(&self, name: &str) -> Result<Arc<dyn Agent>> {
         self.agents
             .get(name)
-            .map(std::convert::AsRef::as_ref)
+            .cloned()
             .ok_or_else(|| AtsError::AgentConfig {
                 message: format!("Agent '{name}' not found"),
             })
@@ -871,7 +881,7 @@ impl AgentRegistry {
     /// # Returns
     ///
     /// The removed agent if it existed, or `None` if not found.
-    pub fn remove(&mut self, name: &str) -> Option<Box<dyn Agent>> {
+    pub fn remove(&mut self, name: &str) -> Option<Arc<dyn Agent>> {
         self.agents.remove(name)
     }
 
@@ -895,11 +905,11 @@ impl AgentRegistry {
         let mut registry = Self::new();
 
         for (name, config) in agents_config {
-            let agent: Box<dyn Agent> = match config.provider.as_str() {
-                "gemini" => Box::new(GeminiAgent::from_env(config.clone())?),
-                "openai" => Box::new(OpenAiAgent::from_env(config.clone())?),
-                "anthropic" | "claude" => Box::new(AnthropicAgent::from_env(config.clone())?),
-                "llama" | "ollama" => Box::new(LlamaAgent::new(config.clone())?),
+            let agent: Arc<dyn Agent> = match config.provider.as_str() {
+                "gemini" => Arc::new(GeminiAgent::from_env(config.clone())?),
+                "openai" => Arc::new(OpenAiAgent::from_env(config.clone())?),
+                "anthropic" | "claude" => Arc::new(AnthropicAgent::from_env(config.clone())?),
+                "llama" | "ollama" => Arc::new(LlamaAgent::new(config.clone())?),
                 other => {
                     return Err(AtsError::NotSupported {
                         message: format!("Provider '{other}' not supported"),
@@ -1077,7 +1087,7 @@ impl Default for AgentDefaults {
 // Thread-Safe Registry
 // -------------------------
 
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
 /// Thread-safe agent registry.
 ///
@@ -1096,7 +1106,7 @@ impl SyncAgentRegistry {
     }
 
     /// Register an agent (thread-safe).
-    pub fn register(&self, name: impl Into<String>, agent: Box<dyn Agent>) {
+    pub fn register(&self, name: impl Into<String>, agent: Arc<dyn Agent>) {
         let mut registry = self.inner.write().unwrap();
         registry.register(name, agent);
     }
@@ -1114,7 +1124,7 @@ impl SyncAgentRegistry {
     }
 
     /// Remove an agent (thread-safe).
-    pub fn remove(&self, name: &str) -> Option<Box<dyn Agent>> {
+    pub fn remove(&self, name: &str) -> Option<Arc<dyn Agent>> {
         let mut registry = self.inner.write().unwrap();
         registry.remove(name)
     }

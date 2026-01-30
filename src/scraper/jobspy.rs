@@ -25,7 +25,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::error::{AtsError, Result};
-use crate::scraper::setup::{auto_install_deps, check_dependencies};
+use crate::scraper::setup::{auto_install_deps, check_dependencies, get_python_exe};
 use crate::scraper::{JobPosting, JobScraper, JobSource, SearchFilters};
 
 /// `JobSpy` scraper that executes Python subprocess.
@@ -92,9 +92,12 @@ impl JobSpyScraper {
         // Try to find the bridge script relative to the executable
         let bridge_script = Self::find_bridge_script();
 
+        // Use the setup module's get_python_exe which prefers venv
+        let python_exe = get_python_exe();
+
         Ok(Self {
             source,
-            python_exe: Self::detect_python_exe(),
+            python_exe,
             timeout_secs: 120, // 2 minute timeout
             bridge_script,
         })
@@ -112,16 +115,6 @@ impl JobSpyScraper {
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout_secs = timeout.as_secs();
         self
-    }
-
-    /// Detect available Python executable.
-    fn detect_python_exe() -> String {
-        // Try python3 first, then python
-        if Command::new("python3").arg("--version").output().is_ok() {
-            "python3".to_string()
-        } else {
-            "python".to_string()
-        }
     }
 
     /// Find the bridge script path.
@@ -194,7 +187,10 @@ impl JobSpyScraper {
         }
 
         // Final check - verify JobSpy can be imported
+        // Use -W ignore to suppress numpy warnings on Windows MINGW-W64
         let jobspy_check = Command::new(&self.python_exe)
+            .arg("-W")
+            .arg("ignore")
             .arg("-c")
             .arg("import jobspy")
             .stdin(Stdio::null())
@@ -259,6 +255,8 @@ impl JobSpyScraper {
             let request_data = request_json.clone();
             move || {
                 let mut child = Command::new(python_exe)
+                    .arg("-W")
+                    .arg("ignore")
                     .arg(&bridge_script)
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
@@ -462,8 +460,10 @@ mod tests {
 
     #[test]
     fn test_python_detection() {
-        let python = JobSpyScraper::detect_python_exe();
-        assert!(python == "python" || python == "python3");
+        // Test the setup module's get_python_exe function
+        let python = crate::scraper::setup::get_python_exe();
+        // Should return either a venv path or system python
+        assert!(!python.is_empty());
     }
 
     #[tokio::test]
