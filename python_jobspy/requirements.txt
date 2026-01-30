@@ -1,0 +1,3 @@
+# Python dependencies for JobSpy Bridge
+python-jobspy>=1.1.0
+pandas>=1.3.0
