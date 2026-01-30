@@ -2,8 +2,23 @@
 //!
 //! This module integrates with the Python `JobSpy` library via subprocess
 //! to scrape job postings from various sources.
+//!
+//! # Setup
+//!
+//! Before using job scraping, you need to set up Python and `JobSpy`:
+//!
+//! 1. Install Python 3.8+ from <https://python.org>
+//! 2. Run the setup script:
+//!    - Windows: `python_jobspy/setup_windows.bat`
+//!    - Linux/Mac: `./python_jobspy/setup.sh`
+//!
+//! Or manually install:
+//! ```bash
+//! pip install python-jobspy pandas
+//! ```
 
-use std::process::Command;
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -21,6 +36,7 @@ use crate::scraper::{JobPosting, JobScraper, JobSource, SearchFilters};
 ///
 /// - Python 3.x must be installed and available in PATH
 /// - `JobSpy` library must be installed: `pip install python-jobspy`
+/// - The bridge script at `python_jobspy/jobspy_bridge.py` must exist
 ///
 /// # Example
 ///
@@ -48,6 +64,8 @@ pub struct JobSpyScraper {
     python_exe: String,
     /// Timeout for subprocess execution in seconds.
     timeout_secs: u64,
+    /// Path to the Python bridge script.
+    bridge_script: std::path::PathBuf,
 }
 
 impl JobSpyScraper {
@@ -70,10 +88,14 @@ impl JobSpyScraper {
                     source: None,
                 })?;
 
+        // Try to find the bridge script relative to the executable
+        let bridge_script = Self::find_bridge_script();
+
         Ok(Self {
             source,
             python_exe: Self::detect_python_exe(),
             timeout_secs: 120, // 2 minute timeout
+            bridge_script,
         })
     }
 
@@ -101,6 +123,26 @@ impl JobSpyScraper {
         }
     }
 
+    /// Find the bridge script path.
+    fn find_bridge_script() -> std::path::PathBuf {
+        // Try several possible locations
+        let possible_paths = [
+            Path::new("python_jobspy/jobspy_bridge.py"),
+            Path::new("../python_jobspy/jobspy_bridge.py"),
+            Path::new("../../python_jobspy/jobspy_bridge.py"),
+            Path::new("./jobspy_bridge.py"),
+        ];
+
+        for path in &possible_paths {
+            if path.exists() {
+                return path.to_path_buf();
+            }
+        }
+
+        // Default to the most common location
+        Path::new("python_jobspy/jobspy_bridge.py").to_path_buf()
+    }
+
     /// Check if Python and `JobSpy` are available.
     ///
     /// # Errors
@@ -108,13 +150,17 @@ impl JobSpyScraper {
     /// Returns an error if:
     /// - Python executable is not found
     /// - `JobSpy` library is not installed
+    /// - The bridge script is not found
     pub fn check_dependencies(&self) -> Result<()> {
         // Check Python
         let python_check = Command::new(&self.python_exe)
             .arg("--version")
             .output()
             .map_err(|e| AtsError::ScraperError {
-                message: format!("Python not found: {e}"),
+                message: format!(
+                    "Python not found: {e}\n\
+                     Please install Python 3.8+ from https://python.org"
+                ),
                 source: Some(Box::new(e)),
             })?;
 
@@ -125,20 +171,45 @@ impl JobSpyScraper {
             });
         }
 
-        // Check JobSpy installation
+        // Check bridge script exists
+        if !self.bridge_script.exists() {
+            return Err(AtsError::ScraperError {
+                message: format!(
+                    "JobSpy bridge script not found at: {}\n\
+                     Please ensure the python_jobspy directory exists and run setup:\n\
+                     Windows: python_jobspy/setup_windows.bat\n\
+                     Linux/Mac: ./python_jobspy/setup.sh",
+                    self.bridge_script.display()
+                ),
+                source: None,
+            });
+        }
+
+        // Check JobSpy installation by running the bridge script with --check
         let jobspy_check = Command::new(&self.python_exe)
-            .arg("-c")
-            .arg("import jobspy")
+            .arg(&self.bridge_script)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
             .output()
             .map_err(|e| AtsError::ScraperError {
-                message: format!("Failed to check JobSpy: {e}"),
+                message: format!(
+                    "Failed to check JobSpy: {e}\n\
+                     Please run setup:\n\
+                     Windows: python_jobspy/setup_windows.bat\n\
+                     Linux/Mac: ./python_jobspy/setup.sh"
+                ),
                 source: Some(Box::new(e)),
             })?;
 
         if !jobspy_check.status.success() {
+            let stderr = String::from_utf8_lossy(&jobspy_check.stderr);
             return Err(AtsError::ScraperError {
-                message: "JobSpy library not installed. Install with: pip install python-jobspy"
-                    .to_string(),
+                message: format!(
+                    "JobSpy not installed: {stderr}\n\
+                     Please install it:\n\
+                     pip install python-jobspy pandas"
+                ),
                 source: None,
             });
         }
@@ -146,29 +217,50 @@ impl JobSpyScraper {
         Ok(())
     }
 
-    /// Execute the `JobSpy` Python script.
+    /// Execute the `JobSpy` Python bridge script.
     async fn execute_jobspy_script(
         &self,
         filters: &SearchFilters,
         max_results: i32,
     ) -> Result<Vec<JobPosting>> {
-        // Serialize filters to JSON
-        let filters_json = serde_json::to_string(filters).map_err(|e| AtsError::ScraperError {
-            message: format!("Failed to serialize filters: {e}"),
+        // Check dependencies first
+        self.check_dependencies()?;
+
+        // Build the request JSON for the bridge script
+        let request = serde_json::json!({
+            "source": self.source.as_str(),
+            "keywords": filters.keywords,
+            "location": filters.location,
+            "max_results": max_results,
+            "remote_only": filters.remote_only,
+            "date_posted": filters.date_posted,
+        });
+
+        let request_json = serde_json::to_string(&request).map_err(|e| AtsError::ScraperError {
+            message: format!("Failed to serialize request: {e}"),
             source: Some(Box::new(e)),
         })?;
 
-        // Build Python script inline
-        let python_script = self.build_python_script(&filters_json, max_results);
-
-        // Execute Python script
+        // Execute Python bridge script with stdin/stdout communication
         let output = tokio::task::spawn_blocking({
             let python_exe = self.python_exe.clone();
+            let bridge_script = self.bridge_script.clone();
+            let request_data = request_json.clone();
             move || {
-                Command::new(python_exe)
-                    .arg("-c")
-                    .arg(python_script)
-                    .output()
+                let mut child = Command::new(python_exe)
+                    .arg(&bridge_script)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()?;
+
+                // Write request to stdin
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use std::io::Write;
+                    stdin.write_all(request_data.as_bytes())?;
+                }
+
+                child.wait_with_output()
             }
         })
         .await
@@ -184,81 +276,40 @@ impl JobSpyScraper {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(AtsError::ScraperError {
-                message: format!("JobSpy script failed: {stderr}"),
+                message: format!("JobSpy bridge script failed: {stderr}"),
                 source: None,
             });
         }
 
         // Parse JSON output
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let json_value: Value =
+        let result: serde_json::Value =
             serde_json::from_str(&stdout).map_err(|e| AtsError::ScraperError {
                 message: format!("Failed to parse JobSpy output: {e}"),
                 source: Some(Box::new(e)),
             })?;
 
-        // Convert to JobPosting objects
-        self.parse_jobspy_results(&json_value)
-    }
+        // Check if the bridge script reported success
+        if let Some(success) = result.get("success").and_then(serde_json::Value::as_bool) {
+            if !success {
+                let error_msg = result
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error from JobSpy");
+                return Err(AtsError::ScraperError {
+                    message: error_msg.to_string(),
+                    source: None,
+                });
+            }
+        }
 
-    /// Build the inline Python script for scraping.
-    fn build_python_script(&self, filters_json: &str, max_results: i32) -> String {
-        format!(
-            r#"
-import json
-import sys
-from jobspy import scrape_jobs
+        // Extract jobs array and convert to JobPosting objects
+        let jobs_value = result.get("jobs").ok_or_else(|| AtsError::ScraperError {
+            message: "No 'jobs' field in response".to_string(),
+            source: None,
+        })?;
 
-# Parse filters
-filters = json.loads('{filters_json}')
-
-# Extract parameters
-site_name = '{source}'
-search_term = filters.get('keywords', '')
-location = filters.get('location', '')
-distance = filters.get('distance_miles')
-is_remote = filters.get('remote_only', False)
-job_type = filters.get('job_type')
-results_wanted = {max_results}
-hours_old = None  # Can be added to filters later
-
-# Convert date_posted to hours_old if present
-if 'date_posted' in filters and filters['date_posted']:
-    date_str = filters['date_posted']
-    if date_str.endswith('h'):
-        hours_old = int(date_str[:-1])
-    elif date_str.endswith('d'):
-        hours_old = int(date_str[:-1]) * 24
-
-try:
-    # Scrape jobs
-    jobs = scrape_jobs(
-        site_name=site_name,
-        search_term=search_term,
-        location=location,
-        distance=distance,
-        is_remote=is_remote,
-        job_type=job_type,
-        results_wanted=results_wanted,
-        hours_old=hours_old,
-    )
-
-    # Convert DataFrame to list of dicts
-    if jobs is not None and not jobs.empty:
-        jobs_list = jobs.to_dict('records')
-        # Output as JSON
-        print(json.dumps(jobs_list, default=str))
-    else:
-        print("[]")
-
-except Exception as e:
-    print(f"Error: {{{{e}}}}", file=sys.stderr)
-    sys.exit(1)
-"#,
-            filters_json = filters_json.replace('\'', "\\'"),
-            source = self.source.as_str(),
-            max_results = max_results
-        )
+        self.parse_jobspy_results(jobs_value)
     }
 
     /// Parse `JobSpy` results from JSON into `JobPosting` objects.
@@ -433,18 +484,16 @@ mod tests {
     }
 
     #[test]
-    fn test_build_python_script() {
+    fn test_bridge_script_path() {
         let scraper = JobSpyScraper::new("linkedin").unwrap();
-        let filters = SearchFilters::builder()
-            .keywords("rust developer")
-            .location("Remote")
-            .build();
-        let filters_json = serde_json::to_string(&filters).unwrap();
+        // The bridge script path should be set
+        assert!(!scraper.bridge_script.as_os_str().is_empty());
+    }
 
-        let script = scraper.build_python_script(&filters_json, 50);
-
-        assert!(script.contains("from jobspy import scrape_jobs"));
-        assert!(script.contains("linkedin"));
-        assert!(script.contains("50"));
+    #[test]
+    fn test_find_bridge_script() {
+        let path = JobSpyScraper::find_bridge_script();
+        // Should return a path (may or may not exist in test environment)
+        assert_eq!(path.file_name().unwrap(), "jobspy_bridge.py");
     }
 }
