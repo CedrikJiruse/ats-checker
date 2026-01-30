@@ -1,4 +1,4 @@
-use ats_checker::agents::{AgentConfig, AgentRegistry};
+use ats_checker::agents::{AgentConfig, AgentDefaults, AgentRegistry, SyncAgentRegistry};
 use ats_checker::error::Result;
 use std::collections::HashMap;
 
@@ -207,4 +207,113 @@ fn test_agent_registry_list_sorted() -> Result<()> {
     assert!(agents.contains(&"charlie"));
 
     Ok(())
+}
+
+#[test]
+fn test_agent_defaults_new() {
+    let defaults = AgentDefaults::new();
+    assert_eq!(defaults.provider, "gemini");
+    assert_eq!(defaults.model_name, "gemini-1.5-flash");
+    assert_eq!(defaults.temperature, 0.7);
+    assert_eq!(defaults.top_p, 0.95);
+    assert_eq!(defaults.top_k, 40);
+    assert_eq!(defaults.max_output_tokens, 8192);
+    assert_eq!(defaults.max_retries, 3);
+    assert!(defaults.retry_on_empty);
+}
+
+#[test]
+fn test_agent_defaults_default() {
+    let defaults = AgentDefaults::default();
+    assert_eq!(defaults.provider, "gemini");
+    assert_eq!(defaults.model_name, "gemini-1.5-flash");
+}
+
+#[test]
+fn test_agent_defaults_apply_to() {
+    let defaults = AgentDefaults::new();
+    let mut config = AgentConfig {
+        name: "test".to_string(),
+        role: "test_role".to_string(),
+        provider: String::new(),   // Empty - should be filled
+        model_name: String::new(), // Empty - should be filled
+        temperature: 0.0,          // Zero - should be filled
+        top_p: 0.0,                // Zero - should be filled
+        top_k: 0,                  // Zero - should be filled
+        max_output_tokens: 0,      // Zero - should be filled
+        max_retries: 0,            // Zero - should be filled
+        retry_on_empty: false,
+        require_json: true,
+        extras: HashMap::new(),
+    };
+
+    defaults.apply_to(&mut config);
+
+    assert_eq!(config.provider, "gemini");
+    assert_eq!(config.model_name, "gemini-1.5-flash");
+    assert_eq!(config.temperature, 0.7);
+    assert_eq!(config.top_p, 0.95);
+    assert_eq!(config.top_k, 40);
+    assert_eq!(config.max_output_tokens, 8192);
+    assert_eq!(config.max_retries, 3);
+}
+
+#[test]
+fn test_agent_defaults_apply_to_preserves_existing() {
+    let defaults = AgentDefaults::new();
+    let mut config = AgentConfig {
+        name: "test".to_string(),
+        role: "test_role".to_string(),
+        provider: "openai".to_string(),  // Should NOT be overwritten
+        model_name: "gpt-4".to_string(), // Should NOT be overwritten
+        temperature: 0.5,                // Non-zero - should NOT be overwritten
+        top_p: 0.8,                      // Non-zero - should NOT be overwritten
+        top_k: 20,                       // Non-zero - should NOT be overwritten
+        max_output_tokens: 2048,         // Non-zero - should NOT be overwritten
+        max_retries: 5,                  // Non-zero - should NOT be overwritten
+        retry_on_empty: false,
+        require_json: true,
+        extras: HashMap::new(),
+    };
+
+    defaults.apply_to(&mut config);
+
+    // Existing values should be preserved
+    assert_eq!(config.provider, "openai");
+    assert_eq!(config.model_name, "gpt-4");
+    assert_eq!(config.temperature, 0.5);
+    assert_eq!(config.top_p, 0.8);
+    assert_eq!(config.top_k, 20);
+    assert_eq!(config.max_output_tokens, 2048);
+    assert_eq!(config.max_retries, 5);
+}
+
+#[test]
+fn test_sync_agent_registry_new() {
+    let registry = SyncAgentRegistry::new();
+    assert_eq!(registry.list().len(), 0);
+}
+
+#[test]
+fn test_sync_agent_registry_default() {
+    let registry = SyncAgentRegistry::default();
+    assert_eq!(registry.list().len(), 0);
+}
+
+#[test]
+fn test_sync_agent_registry_contains() {
+    let sync_registry = SyncAgentRegistry::new();
+
+    // Should return false for non-existent agent
+    assert!(!sync_registry.contains("nonexistent"));
+}
+
+#[test]
+fn test_sync_agent_registry_clone() {
+    let registry1 = SyncAgentRegistry::new();
+    let registry2 = registry1.clone();
+
+    // Both should be independent
+    assert_eq!(registry1.list().len(), 0);
+    assert_eq!(registry2.list().len(), 0);
 }

@@ -454,6 +454,19 @@ impl AgentRegistry {
         self.agents.keys().map(std::string::String::as_str).collect()
     }
 
+    /// Remove an agent from the registry.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the agent to remove
+    ///
+    /// # Returns
+    ///
+    /// The removed agent if it existed, or `None` if not found.
+    pub fn remove(&mut self, name: &str) -> Option<Box<dyn Agent>> {
+        self.agents.remove(name)
+    }
+
     /// Create a registry from a config map.
     ///
     /// Expected format from config TOML:
@@ -488,9 +501,215 @@ impl AgentRegistry {
 
         Ok(registry)
     }
+
+    /// Save agent configurations to a TOML file.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to save the configuration file
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization or file writing fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ats_checker::agents::AgentRegistry;
+    ///
+    /// let registry = AgentRegistry::new();
+    /// // ... register agents ...
+    /// registry.save_to_file("agents.toml").unwrap();
+    /// ```
+    pub fn save_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        let configs: HashMap<String, AgentConfig> = self
+            .agents
+            .iter()
+            .map(|(name, agent)| (name.clone(), agent.config().clone()))
+            .collect();
+
+        crate::toml_io::dump_as(&configs, path)?;
+        Ok(())
+    }
+
+    /// Load agent configurations from a TOML file.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the configuration file
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if file reading, parsing, or agent creation fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use ats_checker::agents::AgentRegistry;
+    ///
+    /// let registry = AgentRegistry::load_from_file("agents.toml").unwrap();
+    /// ```
+    pub fn load_from_file(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let configs: HashMap<String, AgentConfig> = crate::toml_io::load_as(path)?;
+        Self::from_config(&configs)
+    }
+
+    /// Reload the registry from a configuration file.
+    ///
+    /// Clears all current agents and reloads from the file.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the configuration file
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if file reading, parsing, or agent creation fails.
+    pub fn reload_from_file(&mut self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        let new_registry = Self::load_from_file(path)?;
+        self.agents = new_registry.agents;
+        Ok(())
+    }
 }
 
 impl Default for AgentRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// -------------------------
+// Agent Defaults
+// -------------------------
+
+/// Default values for agent configuration.
+///
+/// Used to provide default values for agent configuration fields
+/// when creating agents from configuration.
+#[derive(Debug, Clone)]
+pub struct AgentDefaults {
+    /// Default provider (e.g., "gemini").
+    pub provider: String,
+
+    /// Default model name (e.g., "gemini-1.5-flash").
+    pub model_name: String,
+
+    /// Default temperature (0.0 to 2.0).
+    pub temperature: f64,
+
+    /// Default top-p sampling.
+    pub top_p: f64,
+
+    /// Default top-k sampling.
+    pub top_k: i32,
+
+    /// Default maximum output tokens.
+    pub max_output_tokens: i32,
+
+    /// Default maximum retries.
+    pub max_retries: i32,
+
+    /// Default retry on empty flag.
+    pub retry_on_empty: bool,
+}
+
+impl AgentDefaults {
+    /// Create default agent defaults.
+    pub fn new() -> Self {
+        Self {
+            provider: "gemini".to_string(),
+            model_name: "gemini-1.5-flash".to_string(),
+            temperature: 0.7,
+            top_p: 0.95,
+            top_k: 40,
+            max_output_tokens: 8192,
+            max_retries: 3,
+            retry_on_empty: true,
+        }
+    }
+
+    /// Apply defaults to a partial agent configuration.
+    ///
+    /// Fills in missing fields with default values.
+    pub fn apply_to(&self, config: &mut AgentConfig) {
+        if config.provider.is_empty() {
+            config.provider.clone_from(&self.provider);
+        }
+        if config.model_name.is_empty() {
+            config.model_name.clone_from(&self.model_name);
+        }
+        if config.temperature == 0.0 {
+            config.temperature = self.temperature;
+        }
+        if config.top_p == 0.0 {
+            config.top_p = self.top_p;
+        }
+        if config.top_k == 0 {
+            config.top_k = self.top_k;
+        }
+        if config.max_output_tokens == 0 {
+            config.max_output_tokens = self.max_output_tokens;
+        }
+        if config.max_retries == 0 {
+            config.max_retries = self.max_retries;
+        }
+    }
+}
+
+impl Default for AgentDefaults {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// -------------------------
+// Thread-Safe Registry
+// -------------------------
+
+use std::sync::{Arc, RwLock};
+
+/// Thread-safe agent registry.
+///
+/// Wraps `AgentRegistry` with `Arc<RwLock<>>` for safe concurrent access.
+#[derive(Clone)]
+pub struct SyncAgentRegistry {
+    inner: Arc<RwLock<AgentRegistry>>,
+}
+
+impl SyncAgentRegistry {
+    /// Create a new empty thread-safe registry.
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(AgentRegistry::new())),
+        }
+    }
+
+    /// Register an agent (thread-safe).
+    pub fn register(&self, name: impl Into<String>, agent: Box<dyn Agent>) {
+        let mut registry = self.inner.write().unwrap();
+        registry.register(name, agent);
+    }
+
+    /// Check if an agent exists (thread-safe).
+    pub fn contains(&self, name: &str) -> bool {
+        let registry = self.inner.read().unwrap();
+        registry.get(name).is_ok()
+    }
+
+    /// List all agent names (thread-safe).
+    pub fn list(&self) -> Vec<String> {
+        let registry = self.inner.read().unwrap();
+        registry.list().iter().map(|&s| s.to_string()).collect()
+    }
+
+    /// Remove an agent (thread-safe).
+    pub fn remove(&self, name: &str) -> Option<Box<dyn Agent>> {
+        let mut registry = self.inner.write().unwrap();
+        registry.remove(name)
+    }
+}
+
+impl Default for SyncAgentRegistry {
     fn default() -> Self {
         Self::new()
     }

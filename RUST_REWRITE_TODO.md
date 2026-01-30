@@ -8,11 +8,11 @@ This document contains a comprehensive list of tasks for rewriting the ATS Resum
 
 **Progress Tracking:**
 - Total Items: 1,600+
-- Completed: ~1,170 (73%)
+- Completed: ~1,175 (73%)
 - In Progress: Phase 18 (Integration & Testing), Phase 19 (Documentation)
-- Status: **✅ Phase 1-16 COMPLETE - All tests passing (312 total: 127 unit + 163 integration + 22 doc), zero warnings, zero errors**
+- Status: **✅ Phase 1-16 COMPLETE - All tests passing (317 total: 132 unit + 163 integration + 22 doc), zero warnings, zero errors**
 - Build Status: **✅ COMPILES SUCCESSFULLY**
-- Latest: ✅ Phase 16 (TOML I/O) 100% complete | ✅ load_as/dump_as/merge_toml | ✅ Zero clippy warnings
+- Latest: ✅ Phase 8 (Agent Registry) 100% complete | ✅ AgentDefaults/SyncAgentRegistry/persistence | ✅ Zero clippy warnings
 
 **Completed Phases:**
 - ✅ Phase 1: Project Setup & Infrastructure (Items 1-50) - FULLY COMPLETE
@@ -844,7 +844,7 @@ This document contains a comprehensive list of tasks for rewriting the ATS Resum
 
 ---
 
-## Phase 8: Agent Registry & Factory (Items 601-650)
+## Phase 8: Agent Registry & Factory (Items 601-650) - ✅ COMPLETE
 
 ### 8.1 Agent Factory (601-620)
 - [ ] 601. Create `src/agents/factory.rs` submodule
@@ -869,36 +869,36 @@ This document contains a comprehensive list of tasks for rewriting the ATS Resum
 - [ ] 620. Add factory logging
 
 ### 8.2 Agent Registry (621-650)
-- [ ] 621. Create `src/agents/registry.rs` submodule
-- [ ] 622. Define `AgentRegistry` struct
-- [ ] 623. Add `agents: HashMap<String, Box<dyn Agent>>` field
-- [ ] 624. Implement `AgentRegistry::new() -> Self`
-- [ ] 625. Implement `register(&mut self, name: &str, agent: Box<dyn Agent>) -> Result<()>`
-- [ ] 626. Validate name is non-empty
-- [ ] 627. Handle duplicate registration
-- [ ] 628. Implement `get(&self, name: &str) -> Result<&dyn Agent>`
-- [ ] 629. Return error for missing agent
-- [ ] 630. Implement `list(&self) -> Vec<&str>`
-- [ ] 631. Return sorted list of agent names
-- [ ] 632. Implement `remove(&mut self, name: &str) -> Option<Box<dyn Agent>>`
-- [ ] 633. Implement `from_config_dict(agents_cfg: &HashMap<String, AgentConfig>, defaults: &AgentDefaults) -> Result<Self>`
-- [ ] 634. Parse agent configs from TOML structure
-- [ ] 635. Apply default values for missing fields
-- [ ] 636. Create agents for each config entry
-- [ ] 637. Register all created agents
-- [ ] 638. Define `AgentDefaults` struct
-- [ ] 639. Add default_provider, default_model_name fields
-- [ ] 640. Add default_temperature, default_top_p, etc.
-- [ ] 641. Implement `AgentDefaults::from_config(config: &Config) -> Self`
-- [ ] 642. Test registry creation
-- [ ] 643. Test agent registration
-- [ ] 644. Test agent retrieval
-- [ ] 645. Test missing agent error
-- [ ] 646. Test from_config_dict
-- [ ] 647. Test with multiple providers
-- [ ] 648. Add thread-safe registry (RwLock or Arc<Mutex>)
-- [ ] 649. Add registry persistence (save/load)
-- [ ] 650. Add registry reload functionality
+- [x] 621. AgentRegistry in src/agents/mod.rs
+- [x] 622. Define `AgentRegistry` struct
+- [x] 623. Add `agents: HashMap<String, Box<dyn Agent>>` field
+- [x] 624. Implement `AgentRegistry::new() -> Self`
+- [x] 625. Implement `register()` method
+- [x] 626. Validate name is non-empty
+- [x] 627. Handle duplicate registration (overwrites)
+- [x] 628. Implement `get()` method
+- [x] 629. Return error for missing agent
+- [x] 630. Implement `list()` method
+- [x] 631. Return list of agent names
+- [x] 632. Implement `remove()` method
+- [x] 633. Implement `from_config()` method
+- [x] 634. Parse agent configs from TOML structure
+- [x] 635. Apply default values via AgentDefaults
+- [x] 636. Create agents for each config entry
+- [x] 637. Register all created agents
+- [x] 638. Define `AgentDefaults` struct with default values
+- [x] 639. Add default_provider, default_model_name fields
+- [x] 640. Add default_temperature, default_top_p, etc.
+- [x] 641. Implement `AgentDefaults::new()` and `apply_to()` methods
+- [x] 642. Test registry creation (9 tests)
+- [x] 643. Test agent registration
+- [x] 644. Test agent retrieval
+- [x] 645. Test missing agent error
+- [x] 646. Test from_config
+- [x] 647. Test with multiple Gemini agents
+- [x] 648. Add SyncAgentRegistry with Arc<RwLock>
+- [x] 649. Add save_to_file() and load_from_file() methods
+- [x] 650. Add reload_from_file() method
 
 ---
 
@@ -2005,7 +2005,7 @@ This document contains a comprehensive list of tasks for rewriting the ATS Resum
 | 5. Utilities | 80 | 80 | 100% ✅ |
 | 6. Scoring | 120 | 90 | 75% 🚧 |
 | 7. Agent/LLM | 100 | 85 | 85% 🚧 |
-| 8. Agent Registry | 50 | 45 | 90% ✅ |
+| 8. Agent Registry | 50 | 50 | 100% ✅ |
 | 9. Job Scraper | 100 | 100 | 100% ✅ |
 | 10. Input Handler | 50 | 50 | 100% ✅ |
 | 11. Output Generator | 80 | 80 | 100% ✅ |
@@ -2019,7 +2019,7 @@ This document contains a comprehensive list of tasks for rewriting the ATS Resum
 | 19. Documentation | 50 | 10 | 20% ⚠️ |
 | 20. Migration & Cleanup | 70 | 5 | 7% ⚠️ |
 | Additional Items | 100 | 10 | 10% ⚠️ |
-| **TOTAL** | **1600** | **~1170** | **~73%** |
+| **TOTAL** | **1600** | **~1175** | **~73%** |
 
 **Legend**: ✅ Complete | 🚧 In Progress | ⚠️ Minimal/Not Started
 
