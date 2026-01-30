@@ -2,59 +2,50 @@
 
 > A high-performance Rust application that enhances resumes using AI and scores them against job descriptions.
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]() [![Tests](https://img.shields.io/badge/tests-296%20passing-brightgreen)]() [![Clippy](https://img.shields.io/badge/clippy-zero%20warnings-blue)]() [![License](https://img.shields.io/badge/license-MIT-blue)]()
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]() [![Tests](https://img.shields.io/badge/tests-308%20passing-brightgreen)]() [![Clippy](https://img.shields.io/badge/clippy-zero%20warnings-blue)]() [![License](https://img.shields.io/badge/license-MIT-blue)]()
 
-This is a complete Rust rewrite of the original Python application, focusing on performance, type safety, and enhanced features. The Python version is preserved in [`python-original/`](./python-original/) for reference.
+Rust rewrite focusing on performance, type safety, and multi-provider AI support. Original Python version preserved in [`python-original/`](./python-original/).
 
 ## ✨ Features
 
 ### Core Capabilities
-- 🤖 **AI-Powered Resume Enhancement** - Restructure resumes using Gemini, OpenAI, Claude, or Llama
-- 📊 **Multi-Dimensional Scoring System** - Comprehensive scoring across multiple categories
-  - Resume Quality Score (completeness, skills, experience, impact)
-  - Job Posting Score (clarity, requirements, compensation)
-  - Match Score (keyword overlap, skills alignment, role fit)
-- 🔄 **Iterative Optimization** - Automatically improve resumes until target score reached
-  - Multiple strategies: `best_of`, `first_hit`, `patience`
-  - Configurable target scores and iteration limits
-- 🔍 **Job Scraping** - Search across LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter
-- 📁 **Multiple Format Support** - TXT, PDF, DOCX input; TOML, JSON, TXT output
-- 🖼️ **OCR Support** - Extract text from scanned resume images (PNG, JPG, TIFF, BMP)
-- 📋 **Beautiful CLI Tables** - Color-coded, formatted terminal output
+- 🤖 **Multi-Provider AI Support** - Gemini, OpenAI, Claude, or Llama (auto-detects available APIs)
+- 📊 **Three-Tier Scoring** - Resume quality, job posting quality, and match score
+- 🔄 **Iterative Optimization** - Auto-improve resumes with `best_of`, `first_hit`, or `patience` strategies
+- 🔍 **Job Scraping** - LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter (auto-setup)
+- 📁 **Multiple Formats** - TXT, PDF, DOCX input; TOML, JSON, TXT output
+- 🖼️ **OCR Support** - Extract text from scanned images (PNG, JPG, TIFF, BMP)
+- 📋 **Interactive CLI** - Menu-driven interface with API key management
 - ⚡ **High Performance** - Rust-based with comprehensive benchmarks
 
 ### Quality Assurance
-- ✅ **296 Tests** - 111 unit + 163 integration + 22 doc tests
-- 🔍 **Zero Clippy Warnings** - Strict linting enforced
-- 🎯 **71% Complete** - 1130/1600 items from rewrite checklist
-- 📈 **Performance Benchmarks** - Track optimization progress
+- ✅ **308 Tests** - Comprehensive coverage
+- 🔍 **Zero Clippy Warnings** - Strict linting
+- 📈 **Performance Benchmarks** - Continuous optimization
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Rust 1.70+** - Install from [rustup.rs](https://rustup.rs/)
-- **API Key** - At least one AI provider (Gemini recommended)
-  - Set `GEMINI_API_KEY` environment variable
+- **Rust 1.70+** - Install from <https://rustup.rs>
+- **AI API Key** - At least one of:
+  - `GEMINI_API_KEY` (Google Gemini - recommended)
+  - `OPENAI_API_KEY` (OpenAI GPT)
+  - `ANTHROPIC_API_KEY` (Claude)
+  - Or use local Llama via Ollama (set `OLLAMA_HOST`)
+- **Python 3.8+** (optional) - For job scraping (auto-installed)
 - **Tesseract OCR** (optional) - For image resume support
-  - Windows: [UB Mannheim Tesseract](https://github.com/UB-Mannheim/tesseract/wiki)
+  - Windows: <https://github.com/UB-Mannheim/tesseract/wiki>
   - Linux: `sudo apt-get install tesseract-ocr`
   - macOS: `brew install tesseract`
 
 ### Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/your-username/ats-checker.git
 cd ats-checker
-
-# Build optimized release binary
 cargo build --release
-
-# Set up API key
-export GEMINI_API_KEY="your-api-key-here"
-
-# Run interactive mode
+export GEMINI_API_KEY="your-api-key-here"  # Or other AI key
 cargo run --release
 ```
 
@@ -155,13 +146,33 @@ Total jobs: 47 | Showing top: 20
 
 #### Job Search
 
-Search for jobs across multiple job boards using the integrated JobSpy library.
+Search across LinkedIn, Indeed, Glassdoor, Google Jobs, and ZipRecruiter.
 
-**Prerequisites:**
-- Python 3.9+ with `python-jobspy` package installed:
-  ```bash
-  pip install python-jobspy
-  ```
+**Auto-Setup:** Dependencies are installed automatically on first use. If needed, run menu option 11 or:
+```bash
+cargo run --release -- --setup-jobspy
+```
+
+**Basic Usage:**
+```bash
+# Search LinkedIn for remote Rust jobs
+cargo run --release -- job-search --keywords "rust developer" --sources linkedin --remote
+
+# Search multiple sources with location
+cargo run --release -- job-search --keywords "software engineer" --location "SF" --sources linkedin,indeed,glassdoor
+```
+
+**Features:**
+- **Auto-Setup** - Python and JobSpy installed automatically
+- **Caching** - 30-minute cache to avoid redundant calls
+- **Retry Logic** - Exponential backoff for failures
+- **TOML Output** - Results saved to `workspace/output/job_searches/`
+
+**Combine with Ranking:**
+```bash
+cargo run --release -- job-search --keywords "engineer" --sources linkedin --output search.toml
+cargo run --release -- rank-jobs --results workspace/output/job_searches/search.toml --top 10
+```
 
 **Basic Usage:**
 
@@ -290,10 +301,21 @@ gemini_api_key_env = "GEMINI_API_KEY"
 default_model_name = "gemini-1.5-flash"
 default_temperature = 0.7
 
-[ai.agents.enhancer]
+# Configure multiple AI providers
+[ai.agents.gemini_enhancer]
 role = "enhancer"
 provider = "gemini"
 model_name = "gemini-1.5-flash"
+
+[ai.agents.openai_enhancer]
+role = "enhancer"
+provider = "openai"
+model_name = "gpt-4"
+
+[ai.agents.claude_enhancer]
+role = "enhancer"
+provider = "anthropic"
+model_name = "claude-3-sonnet-20240229"
 ```
 
 ### Scoring Weights (`config/scoring_weights.toml`)
@@ -320,29 +342,25 @@ experience_match = 0.15
 
 ```
 src/
-├── agents/         # Multi-agent LLM abstraction (Gemini, OpenAI, Claude, Llama)
-├── cli/            # Command-line interface
-│   ├── handlers.rs # Command handlers
-│   ├── interactive.rs # Interactive menu
-│   └── table.rs    # Table formatting utilities
+├── agents/         # Multi-provider LLM abstraction
+├── anthropic/      # Claude API integration
+├── cli/            # Command-line interface (interactive menu, handlers)
 ├── config/         # Configuration management
-├── error.rs        # Unified error handling (30+ error types)
+├── error.rs        # Unified error handling
 ├── gemini/         # Gemini API integration
 ├── input/          # File ingestion (TXT, PDF, DOCX)
-├── output/         # Multi-format output generation
+├── llama/          # Ollama/Llama API integration
+├── openai/         # OpenAI API integration
+├── output/         # Multi-format output (TOML, JSON, TXT)
 ├── processor/      # Resume enhancement pipeline
-├── recommendations/ # Improvement suggestions
+├── recommendations/ # AI improvement suggestions
 ├── scoring/        # Three-tier scoring system
-├── scraper/        # Job scraping framework
-├── state/          # State management with content hashing
-├── toml_io/        # TOML serialization utilities
+├── scraper/        # Job scraping (LinkedIn, Indeed, etc.)
+│   ├── jobspy.rs   # Python bridge
+│   └── setup.rs    # Auto-dependency setup
+├── state/          # Processing state management
 ├── utils/          # Shared utilities
-│   ├── extract.rs  # Text extraction
-│   ├── file.rs     # Atomic file operations
-│   ├── hash.rs     # SHA256 hashing
-│   ├── ocr.rs      # Tesseract OCR integration
-│   └── validation.rs # Input validation
-└── validation/     # JSON schema validation
+└── validation/     # Input validation
 ```
 
 ### Data Flow
@@ -383,7 +401,7 @@ cargo build
 # Optimized release build
 cargo build --release
 
-# Run all tests (296 tests)
+# Run all tests (308 tests)
 cargo test
 
 # Run specific test file
@@ -435,106 +453,58 @@ cargo bench -- --save-baseline main
 
 ## 📊 Project Status
 
-**Current Progress:** 71% Complete (1130/1600 items)
+**Status:** Core features complete and stable
 
-### ✅ Completed Phases
-- Core infrastructure (config, error handling, state management)
-- Text extraction (TXT, PDF, DOCX)
-- OCR support (Tesseract integration)
-- Scoring algorithms (resume, job, match)
-- Agent registry (multi-provider LLM support)
-- Processing pipeline with iteration strategies
-- Output generation with comprehensive testing (TOML, JSON, TXT)
-- CLI with table formatting
-- Job scraper with retry logic and caching (JobSpy integration)
-- Comprehensive test suite (296 tests)
-- Performance benchmarks
+### ✅ Completed
+- Multi-provider AI support (Gemini, OpenAI, Claude, Llama)
+- Automatic dependency setup for job scraping
+- Interactive CLI with API key management
+- Comprehensive test suite (308 tests)
+- Zero clippy warnings
 
-### 🚧 In Progress
-- Interactive menu full feature set
-- Additional LLM providers (OpenAI, Claude, Llama)
-- Additional integration tests
-
-### 📋 Upcoming
+### 📋 Future
 - Performance comparison vs Python version
 - Docker containerization
 - CI/CD pipeline
-- Extended documentation
-
-See [RUST_REWRITE_TODO_ACTIVE.md](./RUST_REWRITE_TODO_ACTIVE.md) for detailed progress tracking.
 
 ## 📚 Documentation
 
-- **[CLAUDE.md](./CLAUDE.md)** - Project instructions for AI assistants
-- **[RUST_REWRITE_TODO.md](./RUST_REWRITE_TODO.md)** - Complete implementation checklist
-- **[RUST_REWRITE_TODO_ACTIVE.md](./RUST_REWRITE_TODO_ACTIVE.md)** - Active TODO items
-- **[RUST_REWRITE_PROGRESS.md](./RUST_REWRITE_PROGRESS.md)** - Completed work summary
+- **[python_jobspy/README.md](./python_jobspy/README.md)** - Job scraping setup guide
 - **[config/README.md](./config/README.md)** - Configuration guide
-- **[python-original/README_PYTHON.md](./python-original/README_PYTHON.md)** - Original Python docs
 
 ## 🔧 Troubleshooting
 
-### Common Issues
-
-**OCR not working:**
+**Job scraping fails:**
 ```bash
-# Check Tesseract installation
-tesseract --version
+# Run interactive setup (Menu option 11)
+cargo run --release
+# Select "11. Setup JobSpy"
 
-# Ensure Tesseract is in PATH
-export PATH="$PATH:/usr/local/bin"  # macOS/Linux
-# Windows: Add C:\Program Files\Tesseract-OCR to system PATH
+# Or check dependencies
+cargo run --release -- --setup-jobspy
 ```
 
 **API errors:**
 ```bash
-# Verify API key is set
+# Check available API keys
+cargo run --release
+# Select "10. Check API keys"
+
+# Or verify in shell
 echo $GEMINI_API_KEY
-
-# Test with debug logging
-RUST_LOG=debug cargo run --release
+echo $OPENAI_API_KEY
 ```
 
-**Build errors:**
+**OCR not working:**
 ```bash
-# Update Rust toolchain
-rustup update
-
-# Clean and rebuild
-cargo clean
-cargo build --release
+tesseract --version  # Verify installation
+# Add to PATH if missing
 ```
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests and clippy: `cargo test && cargo clippy -- -D warnings`
-5. Format code: `cargo fmt`
-6. Commit changes (`git commit -m 'Add amazing feature'`)
-7. Push to branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
 
 ## 📄 License
 
-MIT License - see [LICENSE](./LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Original Python implementation team
-- Rust community for excellent tooling
-- AI providers (Gemini, OpenAI, Anthropic, Meta)
-- Open source dependencies (see [Cargo.toml](./Cargo.toml))
-
-## 📞 Support
-
-- **Issues:** [GitHub Issues](https://github.com/your-username/ats-checker/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/your-username/ats-checker/discussions)
-- **Documentation:** Run `cargo doc --open` for API docs
+MIT License - see [LICENSE](./LICENSE)
 
 ---
 
-**Note:** This is a Rust rewrite focusing on performance and type safety. For the original Python version with different features, see [`python-original/`](./python-original/).
+**Note:** Rust rewrite focusing on performance and multi-provider AI support. Original Python version in [`python-original/`](./python-original/)

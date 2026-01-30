@@ -19,7 +19,7 @@ cargo run --release -- --config path/to/config.toml
 ## Test Commands
 
 ```bash
-# Run all tests (296 total)
+# Run all tests (308 total)
 cargo test
 
 # Run a specific test by name
@@ -145,7 +145,7 @@ cargo test && cargo clippy --all-targets --all-features -- -D warnings && cargo 
 
 ## Project Structure
 
-- **71% Complete** (1,140/1,600 items)
-- **296 Tests** (111 unit + 163 integration + 22 doc)
+- **Core Complete** - All major features implemented
+- **308 Tests** - Comprehensive coverage
 - **Zero Clippy Warnings** (enforced)
 - Rust Edition 2021
