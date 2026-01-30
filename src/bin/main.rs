@@ -85,6 +85,34 @@ async fn main() {
                 }
             }
         }
+
+        // Job search subcommand
+        Some(ats_checker::cli::Commands::JobSearch {
+            keywords,
+            location,
+            sources,
+            max_results,
+            remote,
+            output,
+        }) => {
+            match handlers::handle_job_search(
+                &keywords,
+                location.as_deref(),
+                &sources,
+                max_results,
+                remote,
+                output.as_deref(),
+                &config,
+            )
+            .await
+            {
+                Ok(code) => code,
+                Err(e) => {
+                    eprintln!("Error searching jobs: {}", e);
+                    1
+                }
+            }
+        }
     };
 
     process::exit(exit_code);

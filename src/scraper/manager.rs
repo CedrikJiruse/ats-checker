@@ -74,6 +74,10 @@ impl JobScraperManager {
     /// # Returns
     ///
     /// A vector of job postings, deduplicated by URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if all scrapers fail (warnings are logged for individual scraper failures).
     pub async fn search_jobs(
         &self,
         filters: &SearchFilters,
@@ -94,11 +98,11 @@ impl JobScraperManager {
                         }
                     }
                     Err(e) => {
-                        log::warn!("Failed to search {}: {}", source, e);
+                        log::warn!("Failed to search {source}: {e}");
                     }
                 }
             } else {
-                log::warn!("Unknown job source: {}", source);
+                log::warn!("Unknown job source: {source}");
             }
         }
 
@@ -115,50 +119,52 @@ impl JobScraperManager {
     /// # Returns
     ///
     /// The full path to the saved file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be written or serialization fails.
     pub fn save_results(&self, results: &[JobPosting], filename: &str) -> Result<PathBuf> {
         let path = self.results_folder.join(filename);
 
         // Determine format from extension
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("toml");
 
-        match ext {
-            "json" => {
-                let json = serde_json::to_string_pretty(results)?;
-                std::fs::write(&path, json)?;
-            }
-            _ => {
-                // Default to TOML
-                let wrapper = ResultsWrapper {
-                    jobs: results.to_vec(),
-                };
-                let toml_str =
-                    toml::to_string_pretty(&wrapper).map_err(|e| AtsError::TomlParse {
-                        message: e.to_string(),
-                        source: None,
-                    })?;
-                std::fs::write(&path, toml_str)?;
-            }
+        if ext == "json" {
+            let json = serde_json::to_string_pretty(results)?;
+            std::fs::write(&path, json)?;
+        } else {
+            // Default to TOML
+            let wrapper = ResultsWrapper {
+                jobs: results.to_vec(),
+            };
+            let toml_str =
+                toml::to_string_pretty(&wrapper).map_err(|e| AtsError::TomlParse {
+                    message: e.to_string(),
+                    source: None,
+                })?;
+            std::fs::write(&path, toml_str)?;
         }
 
         Ok(path)
     }
 
     /// Load job search results from a file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read or deserialization fails.
     pub fn load_results(&self, path: impl AsRef<Path>) -> Result<Vec<JobPosting>> {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)?;
 
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("toml");
 
-        match ext {
-            "json" => {
-                let jobs: Vec<JobPosting> = serde_json::from_str(&content)?;
-                Ok(jobs)
-            }
-            _ => {
-                let wrapper: ResultsWrapper = toml::from_str(&content)?;
-                Ok(wrapper.jobs)
-            }
+        if ext == "json" {
+            let jobs: Vec<JobPosting> = serde_json::from_str(&content)?;
+            Ok(jobs)
+        } else {
+            let wrapper: ResultsWrapper = toml::from_str(&content)?;
+            Ok(wrapper.jobs)
         }
     }
 
@@ -173,11 +179,15 @@ impl JobScraperManager {
     /// # Returns
     ///
     /// A vector of ranked job entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the results file cannot be loaded or parsed.
     pub fn rank_jobs_in_results(
         &self,
         path: impl AsRef<Path>,
         top_n: i32,
-        recompute_missing: bool,
+        _recompute_missing: bool,
     ) -> Result<Vec<RankedJob>> {
         let mut jobs = self.load_results(path)?;
 
@@ -215,6 +225,10 @@ impl JobScraperManager {
     /// # Returns
     ///
     /// The number of jobs exported.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the destination folder cannot be created or files cannot be written.
     pub fn export_to_job_descriptions(
         &self,
         jobs: &[JobPosting],
@@ -232,7 +246,7 @@ impl JobScraperManager {
             let safe_company = job
                 .company
                 .replace(|c: char| !c.is_alphanumeric() && c != ' ', "");
-            let filename = format!("{}_{}.txt", safe_title, safe_company)
+            let filename = format!("{safe_title}_{safe_company}.txt")
                 .replace("  ", " ")
                 .replace(' ', "_");
 

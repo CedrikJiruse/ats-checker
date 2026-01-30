@@ -6,9 +6,9 @@
 //! # Error Hierarchy
 //!
 //! - [`AtsError`] - Main error enum containing all error variants
-//! - [`ConfigError`] - Configuration-related errors
-//! - [`ApiError`] - External API call errors
-//! - [`ScraperError`] - Job scraping errors
+//! - Configuration errors - Configuration-related errors (`ConfigNotFound`, `ConfigParse`, etc.)
+//! - API errors - External API call errors (`ApiRequest`, `ApiResponse`, etc.)
+//! - Scraper errors - Job scraping errors (`JobScraperOperation`, `JobPortalNotFound`, etc.)
 //!
 //! # Example
 //!
@@ -146,6 +146,13 @@ pub enum AtsError {
         message: String,
     },
 
+    /// DOCX extraction error.
+    #[error("DOCX extraction error: {message}")]
+    DocxExtraction {
+        /// Description of the extraction error.
+        message: String,
+    },
+
     /// Text extraction error.
     #[error("Text extraction error: {message}")]
     TextExtraction {
@@ -266,6 +273,23 @@ pub enum AtsError {
         /// The source that blocked the scraper.
         source_name: String,
         /// Description of the block.
+        message: String,
+    },
+
+    /// General scraper error.
+    #[error("Scraper error: {message}")]
+    ScraperError {
+        /// Description of the scraper error.
+        message: String,
+        /// The underlying error.
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
+
+    /// Cache operation error.
+    #[error("Cache error: {message}")]
+    CacheError {
+        /// Description of the cache error.
         message: String,
     },
 
@@ -439,7 +463,10 @@ impl AtsError {
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            Self::ApiRateLimit { .. } | Self::ApiTimeout { .. } | Self::Network { .. }
+            Self::ApiRateLimit { .. }
+                | Self::ApiTimeout { .. }
+                | Self::Network { .. }
+                | Self::ScraperError { .. }
         )
     }
 

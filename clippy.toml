@@ -1,0 +1,40 @@
+# Clippy configuration for ATS Checker
+#
+# This file configures clippy lints for the project.
+# See: https://doc.rust-lang.org/clippy/lint_configuration.html
+
+# Cognitive complexity threshold for functions
+cognitive-complexity-threshold = 30
+
+# Maximum number of single char bindings in a scope
+single-char-binding-names-threshold = 5
+
+# Maximum number of lines for a function
+too-many-lines-threshold = 150
+
+# Maximum number of arguments for a function
+too-many-arguments-threshold = 8
+
+# Minimum number of enum variants to suggest using an enum
+enum-variant-name-threshold = 3
+
+# Maximum number of struct fields to suggest using a dedicated struct
+struct-field-name-threshold = 3
+
+# Warn on missing documentation for public items
+missing-docs-in-crate-items = false
+
+# Allow expect() for clarity in tests and examples
+allow-expect-in-tests = true
+
+# Allow unwrap() for clarity in tests
+allow-unwrap-in-tests = true
+
+# Disallowed methods (we don't want these used in production code)
+disallowed-methods = []
+
+# Disallowed types
+disallowed-types = []
+
+# Avoid dbg! macro in production
+avoid-breaking-exported-api = true

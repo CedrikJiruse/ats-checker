@@ -8,27 +8,28 @@
 //!
 //! ## Resume Score (0-100)
 //! - **completeness**: Has required fields (name, email, experience, etc.)
-//! - **skills_quality**: Quality and quantity of skills listed
-//! - **experience_quality**: Quality of experience bullets (action verbs, quantification)
+//! - **`skills_quality`**: Quality and quantity of skills listed
+//! - **`experience_quality`**: Quality of experience bullets (action verbs, quantification)
 //! - **impact**: Quantification and outcome-focused language
 //!
 //! ## Job Score (0-100)
 //! - **completeness**: Has required fields (title, company, description, etc.)
 //! - **clarity**: Description length and structure
-//! - **compensation_transparency**: Salary information present
-//! - **link_quality**: Valid URL present
+//! - **`compensation_transparency`**: Salary information present
+//! - **`link_quality`**: Valid URL present
 //!
 //! ## Match Score (0-100)
-//! - **keyword_overlap**: Keywords from job found in resume
-//! - **skills_overlap**: Skills from resume found in job description
-//! - **role_alignment**: Job title matches resume titles
+//! - **`keyword_overlap`**: Keywords from job found in resume
+//! - **`skills_overlap`**: Skills from resume found in job description
+//! - **`role_alignment`**: Job title matches resume titles
 //!
 //! # Example
 //!
-//! ```rust
+//! ```rust,no_run
 //! use ats_checker::scoring;
 //! use serde_json::json;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let resume = json!({
 //!     "personal_info": {"name": "John Doe", "email": "john@example.com"},
 //!     "experience": [{"title": "Engineer", "description": ["Built systems"]}],
@@ -37,6 +38,8 @@
 //!
 //! let report = scoring::score_resume(&resume, Some("config/scoring_weights.toml"))?;
 //! println!("Resume score: {}", report.total);
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::error::Result;
@@ -51,7 +54,7 @@ use std::path::Path;
 /// A single category score with details.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScoreCategoryResult {
-    /// Category name (e.g., "completeness", "skills_quality")
+    /// Category name (e.g., "completeness", "`skills_quality`")
     pub name: String,
     /// Score for this category (0-100)
     pub score: f64,
@@ -239,7 +242,7 @@ pub fn load_overall_iteration_weights(weights_path: Option<&str>) -> HashMap<Str
 /// Normalize weights to sum to 1.0.
 ///
 /// Ignores non-positive weights. If all weights are <= 0, returns 0 for all.
-pub fn normalize_weights(weights: &HashMap<String, f64>) -> HashMap<String, f64> {
+pub fn normalize_weights<S: std::hash::BuildHasher>(weights: &HashMap<String, f64, S>) -> HashMap<String, f64> {
     let positive: HashMap<String, f64> = weights
         .iter()
         .filter(|(_, &v)| v > 0.0)
@@ -275,7 +278,7 @@ pub fn compute_iteration_score(
 
     // Fallback to mean if no weights configured
     let score = if resume_weight + match_weight <= 0.0 {
-        (resume_report.total + match_report.total) / 2.0
+        f64::midpoint(resume_report.total, match_report.total)
     } else {
         (resume_report.total * resume_weight) + (match_report.total * match_weight)
     };
@@ -301,7 +304,11 @@ pub fn compute_iteration_score(
 
 /// Score a resume across multiple quality categories.
 ///
-/// Returns a ScoreReport with weighted total (0-100) and category breakdowns.
+/// Returns a `ScoreReport` with weighted total (0-100) and category breakdowns.
+///
+/// # Errors
+///
+/// Returns an error if the weights file cannot be loaded or parsed.
 pub fn score_resume(resume: &serde_json::Value, weights_path: Option<&str>) -> Result<ScoreReport> {
     let all_weights = load_scoring_weights(weights_path);
     let resume_weights = all_weights
@@ -368,35 +375,29 @@ fn score_resume_completeness(
     let exp = resume
         .get("experience")
         .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+        .map_or(0, std::vec::Vec::len);
     let edu = resume
         .get("education")
         .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+        .map_or(0, std::vec::Vec::len);
     let skills = resume
         .get("skills")
         .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+        .map_or(0, std::vec::Vec::len);
     let projects = resume
         .get("projects")
         .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
+        .map_or(0, std::vec::Vec::len);
 
     let has_name = personal
         .and_then(|p| p.get("name"))
         .and_then(|v| v.as_str())
-        .map(|s| !s.trim().is_empty())
-        .unwrap_or(false);
+        .is_some_and(|s| !s.trim().is_empty());
 
     let has_email = personal
         .and_then(|p| p.get("email"))
         .and_then(|v| v.as_str())
-        .map(|s| !s.trim().is_empty())
-        .unwrap_or(false);
+        .is_some_and(|s| !s.trim().is_empty());
 
     let has_summary = !summary.trim().is_empty();
     let has_experience = exp > 0;
@@ -522,10 +523,10 @@ fn score_resume_experience_quality(
     }
 
     // Scoring: bullet volume (saturates at 10), action verb ratio, quantified ratio
-    let vol = (total_bullets as f64 / 10.0).min(1.0) * 35.0;
-    let action_ratio = action_bullets as f64 / total_bullets as f64;
+    let vol = (f64::from(total_bullets) / 10.0).min(1.0) * 35.0;
+    let action_ratio = f64::from(action_bullets) / f64::from(total_bullets);
     let action = action_ratio * 35.0;
-    let quant_ratio = quantified_bullets as f64 / total_bullets as f64;
+    let quant_ratio = f64::from(quantified_bullets) / f64::from(total_bullets);
     let quant = quant_ratio * 30.0;
 
     let score = vol + action + quant;
@@ -621,6 +622,10 @@ fn score_resume_impact(resume: &serde_json::Value) -> (f64, HashMap<String, serd
 // -------------------------
 
 /// Score a job posting across multiple quality categories.
+///
+/// # Errors
+///
+/// Returns an error if the weights file cannot be loaded or parsed.
 pub fn score_job(job: &serde_json::Value, weights_path: Option<&str>) -> Result<ScoreReport> {
     let all_weights = load_scoring_weights(weights_path);
     let job_weights = all_weights
@@ -816,6 +821,10 @@ fn score_job_link_quality(job: &serde_json::Value) -> (f64, HashMap<String, serd
 // -------------------------
 
 /// Score the match between a resume and a job posting.
+///
+/// # Errors
+///
+/// Returns an error if the weights file cannot be loaded or parsed.
 pub fn score_match(
     resume: &serde_json::Value,
     job: &serde_json::Value,
@@ -875,12 +884,10 @@ fn score_match_keyword_overlap(
     resume: &serde_json::Value,
     job: &serde_json::Value,
 ) -> (f64, HashMap<String, serde_json::Value>) {
-    let job_text = vec![
-        safe_str(job.get("title")),
+    let job_text = [safe_str(job.get("title")),
         safe_str(job.get("description")),
         safe_str(job.get("company")),
-        safe_str(job.get("location")),
-    ]
+        safe_str(job.get("location"))]
     .join(" ");
 
     let resume_text = resume_as_text(resume);
@@ -921,8 +928,8 @@ fn score_match_keyword_overlap(
     );
     details.insert("overlap_ratio".to_string(), serde_json::json!(ratio));
 
-    let sample_overlap: Vec<String> = overlap.iter().take(20).map(|s| s.to_string()).collect();
-    let sample_missing: Vec<String> = missing.iter().take(20).map(|s| s.to_string()).collect();
+    let sample_overlap: Vec<String> = overlap.iter().take(20).map(|s| (*s).clone()).collect();
+    let sample_missing: Vec<String> = missing.iter().take(20).map(|s| (*s).clone()).collect();
     details.insert(
         "sample_overlap".to_string(),
         serde_json::json!(sample_overlap),
@@ -960,7 +967,7 @@ fn score_match_skills_overlap(
         return (0.0, details);
     }
 
-    let job_text = vec![safe_str(job.get("title")), safe_str(job.get("description"))].join(" ");
+    let job_text = [safe_str(job.get("title")), safe_str(job.get("description"))].join(" ");
     let job_tokens = extract_keywords(&job_text);
 
     let mut matched = HashSet::new();
@@ -1071,7 +1078,7 @@ fn score_match_role_alignment(
         let overlap = job_toks.intersection(&rt).count() as f64 / job_toks.len() as f64;
         if overlap > best {
             best = overlap;
-            best_title = title.clone();
+            best_title.clone_from(title);
         }
     }
 
@@ -1244,12 +1251,12 @@ fn looks_like_action_bullet(bullet: &str) -> bool {
 
     let first_word = b.split_whitespace().next().unwrap_or("");
 
-    if action_verbs().iter().any(|&v| v == first_word) {
+    if action_verbs().contains(&first_word) {
         return true;
     }
 
     for verb in action_verbs() {
-        if b.starts_with(&format!("{} ", verb)) {
+        if b.starts_with(&format!("{verb} ")) {
             return true;
         }
     }
@@ -1259,7 +1266,7 @@ fn looks_like_action_bullet(bullet: &str) -> bool {
 
 fn contains_number(s: &str) -> bool {
     // Match digits with optional decimal and % sign
-    s.chars().any(|c| c.is_numeric())
+    s.chars().any(char::is_numeric)
 }
 
 fn contains_outcome_language(s: &str) -> bool {

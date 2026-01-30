@@ -15,7 +15,20 @@
       "Bash(git mv:*)",
       "Bash(cargo test:*)",
       "Bash(cargo build:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(rustc:*)",
+      "Bash(cargo --version:*)",
+      "Bash(find:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo doc:*)",
+      "Bash(Select-String -Pattern \"error|warning|Finished|Compiling ats-checker\")",
+      "Bash(test:*)",
+      "Bash(while read:*)",
+      "Bash(do if ! grep -q \"^mod tests\" \"$f\")",
+      "Bash(then echo \"$f\")",
+      "Bash(fi)",
+      "Bash(done)",
+      "Bash(cargo bench:*)"
     ]
   },
   "outputStyle": "default"

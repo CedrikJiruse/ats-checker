@@ -63,11 +63,11 @@ pub struct Config {
     #[serde(default = "default_temperature")]
     pub default_temperature: f64,
 
-    /// Default top_p.
+    /// Default `top_p`.
     #[serde(default = "default_top_p")]
     pub default_top_p: f64,
 
-    /// Default top_k.
+    /// Default `top_k`.
     #[serde(default = "default_top_k")]
     pub default_top_k: i32,
 
@@ -94,7 +94,7 @@ pub struct Config {
     #[serde(default = "default_max_iterations")]
     pub max_iterations: i32,
 
-    /// Iteration strategy (best_of, first_hit, patience).
+    /// Iteration strategy (`best_of`, `first_hit`, patience).
     #[serde(default = "default_iteration_strategy")]
     pub iteration_strategy: String,
 
@@ -303,6 +303,10 @@ impl Default for Config {
 
 impl Config {
     /// Load configuration from a TOML file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, parsed, or validated.
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
 
@@ -331,6 +335,7 @@ impl Config {
     }
 
     /// Merge another config into this one (overlay pattern).
+    #[must_use]
     pub fn merge(mut self, overlay: Config) -> Self {
         // Only merge non-default values
         // This is a simplified merge - a real implementation would be more sophisticated
@@ -368,6 +373,10 @@ impl Config {
     }
 
     /// Ensure all required directories exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any directory cannot be created due to permission or filesystem errors.
     pub fn ensure_directories(&self) -> Result<()> {
         let dirs = [
             &self.input_resumes_folder,
@@ -398,6 +407,10 @@ impl Config {
     }
 
     /// Validate the configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if configuration values are invalid (e.g., invalid iteration strategy, negative values).
     pub fn validate(&self) -> Result<()> {
         // Validate iteration strategy
         let valid_strategies = ["best_of", "first_hit", "patience"];
@@ -510,7 +523,6 @@ pub struct PortalConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
 
     #[test]
     fn test_default_config() {

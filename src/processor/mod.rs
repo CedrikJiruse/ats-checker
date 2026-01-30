@@ -27,7 +27,7 @@
 //! }
 //! ```
 
-use crate::agents::{Agent, AgentRegistry};
+use crate::agents::AgentRegistry;
 use crate::config::Config;
 use crate::error::{AtsError, Result};
 use crate::input::InputHandler;
@@ -36,7 +36,7 @@ use crate::recommendations::{generate_recommendations, Recommendation};
 use crate::scoring::{score_match, score_resume, ScoreReport};
 use crate::state::StateManager;
 use crate::utils::hash::calculate_file_hash;
-use crate::validation::{validate_resume_json, ValidationResult};
+use crate::validation::validate_json;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -64,7 +64,7 @@ pub struct ProcessingResult {
 /// Iteration strategy for improving scores.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IterationStrategy {
-    /// Keep best candidate, stop on target/no_progress/max_iterations.
+    /// Keep best candidate, stop on `target/no_progress/max_iterations`.
     BestOf,
     /// Stop immediately when target score reached.
     FirstHit,
@@ -72,16 +72,16 @@ pub enum IterationStrategy {
     Patience,
 }
 
-impl IterationStrategy {
-    /// Parse from string.
-    pub fn from_str(s: &str) -> Result<Self> {
+impl std::str::FromStr for IterationStrategy {
+    type Err = AtsError;
+
+    fn from_str(s: &str) -> Result<Self> {
         match s.to_lowercase().as_str() {
             "best_of" => Ok(Self::BestOf),
             "first_hit" => Ok(Self::FirstHit),
             "patience" => Ok(Self::Patience),
-            _ => Err(AtsError::ConfigError(format!(
-                "Invalid iteration strategy: {}",
-                s
+            _ => Err(AtsError::config_parse(format!(
+                "Invalid iteration strategy: {s}"
             ))),
         }
     }
@@ -102,6 +102,10 @@ pub struct ResumeProcessor {
 
 impl ResumeProcessor {
     /// Create a new resume processor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the state file cannot be loaded or the agent registry cannot be initialized.
     pub fn new(config: Config) -> Result<Self> {
         // Initialize state manager
         let state_manager = StateManager::new(config.state_file.clone())?;
@@ -110,7 +114,6 @@ impl ResumeProcessor {
         let input_handler = InputHandler::new(
             config.input_resumes_folder.clone(),
             config.job_descriptions_folder.clone(),
-            config.tesseract_cmd.clone(),
         );
 
         // Initialize output generator
@@ -121,7 +124,30 @@ impl ResumeProcessor {
         );
 
         // Initialize agent registry from config
-        let agent_registry = AgentRegistry::from_config(&config)?;
+        // Convert config::AgentConfig to agents::AgentConfig
+        let agents_config: std::collections::HashMap<String, crate::agents::AgentConfig> = config
+            .ai_agents
+            .iter()
+            .map(|(name, cfg)| {
+                let agent_cfg = crate::agents::AgentConfig {
+                    name: name.clone(),
+                    provider: cfg.provider.clone(),
+                    role: cfg.role.clone(),
+                    model_name: cfg.model_name.clone(),
+                    temperature: cfg.temperature,
+                    top_p: cfg.top_p,
+                    top_k: cfg.top_k,
+                    max_output_tokens: cfg.max_output_tokens,
+                    max_retries: cfg.max_retries,
+                    retry_on_empty: cfg.retry_on_empty,
+                    require_json: cfg.require_json,
+                    extras: cfg.extras.clone(),
+                };
+                (name.clone(), agent_cfg)
+            })
+            .collect();
+
+        let agent_registry = AgentRegistry::from_config(&agents_config)?;
 
         Ok(Self {
             config,
@@ -138,6 +164,10 @@ impl ResumeProcessor {
     ///
     /// * `resume_path` - Path to the resume file
     /// * `job_path` - Optional path to job description file
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the resume file cannot be read, AI enhancement fails, scoring fails, or output generation fails.
     pub async fn process_resume(
         &mut self,
         resume_path: &str,
@@ -148,7 +178,7 @@ impl ResumeProcessor {
         // Step 1: Calculate hash and check if already processed
         let resume_hash = calculate_file_hash(resume_file)?;
         if self.state_manager.is_processed(&resume_hash) {
-            log::info!("Resume already processed (hash: {}), skipping", resume_hash);
+            log::info!("Resume already processed (hash: {resume_hash}), skipping");
             return Ok(ProcessingResult {
                 success: true,
                 output_dir: None,
@@ -160,13 +190,13 @@ impl ResumeProcessor {
         }
 
         // Step 2: Load resume text
-        log::info!("Loading resume from: {}", resume_path);
-        let resume_text = self.input_handler.load_file(resume_file)?;
+        log::info!("Loading resume from: {resume_path}");
+        let resume_text = self.input_handler.load_resume(resume_file)?;
 
         // Step 3: Load job description (optional)
         let job_text = if let Some(jp) = job_path {
-            log::info!("Loading job description from: {}", jp);
-            Some(self.input_handler.load_file(Path::new(jp))?)
+            log::info!("Loading job description from: {jp}");
+            Some(self.input_handler.load_job_description(Path::new(jp))?)
         } else {
             None
         };
@@ -178,8 +208,19 @@ impl ResumeProcessor {
         // Step 5: Validate schema (if enabled)
         if self.config.schema_validation_enabled {
             log::info!("Validating enhanced resume against schema...");
-            let validation = validate_resume_json(&enhanced_resume, &self.config.resume_schema_path)?;
-            if !validation.valid {
+            // Load schema file
+            let schema_content = std::fs::read_to_string(&self.config.resume_schema_path)
+                .map_err(|e| AtsError::io(
+                    format!("Failed to read schema file: {}", self.config.resume_schema_path.display()),
+                    e
+                ))?;
+            let schema: serde_json::Value = serde_json::from_str(&schema_content)
+                .map_err(|e| AtsError::internal(
+                    format!("Failed to parse schema JSON: {e}")
+                ))?;
+
+            let validation = validate_json(&enhanced_resume, &schema)?;
+            if !validation.ok {
                 log::warn!("Schema validation failed: {:?}", validation.errors);
                 // Optionally retry or fail here
             }
@@ -187,15 +228,21 @@ impl ResumeProcessor {
 
         // Step 6: Score the enhanced resume
         log::info!("Scoring enhanced resume...");
-        let resume_score = score_resume(&enhanced_resume, Some(&self.config.scoring_weights_file))?;
+        let weights_path = self.config.scoring_weights_file.to_str();
+        let resume_score = score_resume(&enhanced_resume, weights_path)?;
 
         // Step 7: Score match if job description provided
         let match_score = if let Some(job_txt) = &job_text {
             log::info!("Scoring resume-job match...");
+            // Convert job text to JSON structure
+            let job_json = serde_json::json!({
+                "description": job_txt,
+                "raw_text": job_txt
+            });
             Some(score_match(
                 &enhanced_resume,
-                job_txt,
-                Some(&self.config.scoring_weights_file),
+                &job_json,
+                weights_path,
             )?)
         } else {
             None
@@ -204,13 +251,13 @@ impl ResumeProcessor {
         // Step 8: Combine scores for overall evaluation
         let combined_score = if let Some(ms) = &match_score {
             // Weighted average: 50% resume quality + 50% match quality
-            (resume_score.total + ms.total) / 2.0
+            f64::midpoint(resume_score.total, ms.total)
         } else {
             resume_score.total
         };
 
         // Step 9: Iterate to improve scores (if enabled)
-        let (final_resume, final_resume_score, final_match_score) =
+        let (final_resume, final_resume_score, _final_match_score) =
             if self.config.iterate_until_score_reached && combined_score < self.config.target_score
             {
                 log::info!(
@@ -233,9 +280,11 @@ impl ResumeProcessor {
         // Step 10: Generate recommendations (if enabled)
         let recommendations = if self.config.recommendations_enabled {
             log::info!("Generating recommendations...");
+            // Convert score report to JSON for recommendation generation
+            let score_json = serde_json::to_value(&final_resume_score)
+                .map_err(|e| AtsError::internal(format!("Failed to serialize score report: {e}")))?;
             generate_recommendations(
-                &final_resume,
-                &final_resume_score,
+                &score_json,
                 self.config.recommendations_max_items as usize,
             )
         } else {
@@ -253,7 +302,7 @@ impl ResumeProcessor {
             Path::new(jp)
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
         });
 
         let output_data = OutputData {
@@ -292,7 +341,7 @@ impl ResumeProcessor {
     ) -> Result<serde_json::Value> {
         // Get the enhancer agent
         let agent = self.agent_registry.get("enhancer").map_err(|_| {
-            AtsError::AgentError("Enhancer agent not found in registry".to_string())
+            AtsError::internal("Enhancer agent not found in registry")
         })?;
 
         // Build prompt
@@ -302,47 +351,45 @@ impl ResumeProcessor {
                  Return a structured JSON object with fields: name, email, phone, \
                  location, summary, experience (array), skills (array), education (array), \
                  certifications (array).\n\n\
-                 RESUME:\n{}\n\n\
-                 JOB DESCRIPTION:\n{}",
-                resume_text, job
+                 RESUME:\n{resume_text}\n\n\
+                 JOB DESCRIPTION:\n{job}"
             )
         } else {
             format!(
                 "Enhance the following resume. Return a structured JSON object with \
                  fields: name, email, phone, location, summary, experience (array), \
                  skills (array), education (array), certifications (array).\n\n\
-                 RESUME:\n{}",
-                resume_text
+                 RESUME:\n{resume_text}"
             )
         };
 
         // Call agent
-        let response = agent.generate(&prompt).await?;
+        let response = agent.generate_json(&prompt).await?;
 
-        // Parse JSON response
-        serde_json::from_str(&response).map_err(|e| {
-            AtsError::ValidationError(format!("Failed to parse enhanced resume JSON: {}", e))
-        })
+        // Response is already a JSON value
+        Ok(response)
     }
 
     /// Iterate to improve scores.
     #[allow(clippy::type_complexity)]
     async fn iterate_improvement(
         &self,
-        resume_text: &str,
+        _resume_text: &str,
         job_text: Option<&str>,
         initial_resume: serde_json::Value,
         initial_resume_score: ScoreReport,
         initial_match_score: Option<ScoreReport>,
     ) -> Result<(serde_json::Value, ScoreReport, Option<ScoreReport>)> {
-        let strategy = IterationStrategy::from_str(&self.config.iteration_strategy)?;
+        let strategy = self.config.iteration_strategy.parse::<IterationStrategy>()?;
 
         let mut best_resume = initial_resume;
         let mut best_resume_score = initial_resume_score;
         let mut best_match_score = initial_match_score;
-        let mut best_combined = self.calculate_combined_score(&best_resume_score, &best_match_score);
+        let mut best_combined = self.calculate_combined_score(&best_resume_score, best_match_score.as_ref());
 
         let mut no_improvement_count = 0;
+
+        let weights_path = self.config.scoring_weights_file.to_str();
 
         for iteration in 1..=self.config.max_iterations {
             log::info!("Iteration {}/{}...", iteration, self.config.max_iterations);
@@ -354,25 +401,28 @@ impl ResumeProcessor {
 
             // Score new candidate
             let candidate_resume_score =
-                score_resume(&candidate, Some(&self.config.scoring_weights_file))?;
+                score_resume(&candidate, weights_path)?;
 
-            let candidate_match_score = if job_text.is_some() {
+            let candidate_match_score = if let Some(job_txt) = job_text {
+                // Convert job text to JSON structure
+                let job_json = serde_json::json!({
+                    "description": job_txt,
+                    "raw_text": job_txt
+                });
                 Some(score_match(
                     &candidate,
-                    job_text.unwrap(),
-                    Some(&self.config.scoring_weights_file),
+                    &job_json,
+                    weights_path,
                 )?)
             } else {
                 None
             };
 
             let candidate_combined =
-                self.calculate_combined_score(&candidate_resume_score, &candidate_match_score);
+                self.calculate_combined_score(&candidate_resume_score, candidate_match_score.as_ref());
 
             log::info!(
-                "Candidate score: {:.2} (previous best: {:.2})",
-                candidate_combined,
-                best_combined
+                "Candidate score: {candidate_combined:.2} (previous best: {best_combined:.2})"
             );
 
             // Check for improvement
@@ -383,7 +433,7 @@ impl ResumeProcessor {
                 best_combined = candidate_combined;
                 no_improvement_count = 0;
 
-                log::info!("New best score: {:.2}", best_combined);
+                log::info!("New best score: {best_combined:.2}");
 
                 // FirstHit: stop immediately if target reached
                 if strategy == IterationStrategy::FirstHit
@@ -399,7 +449,7 @@ impl ResumeProcessor {
                 if strategy == IterationStrategy::Patience
                     && no_improvement_count >= self.config.max_regressions
                 {
-                    log::info!("No improvement for {} iterations, stopping (Patience)", no_improvement_count);
+                    log::info!("No improvement for {no_improvement_count} iterations, stopping (Patience)");
                     break;
                 }
             }
@@ -423,7 +473,7 @@ impl ResumeProcessor {
     ) -> Result<serde_json::Value> {
         // Get the reviser agent
         let agent = self.agent_registry.get("reviser").map_err(|_| {
-            AtsError::AgentError("Reviser agent not found in registry".to_string())
+            AtsError::internal("Reviser agent not found in registry")
         })?;
 
         // Build revision prompt with score feedback
@@ -461,31 +511,33 @@ impl ResumeProcessor {
         };
 
         // Call agent
-        let response = agent.generate(&prompt).await?;
+        let response = agent.generate_json(&prompt).await?;
 
-        // Parse JSON response
-        serde_json::from_str(&response).map_err(|e| {
-            AtsError::ValidationError(format!("Failed to parse revised resume JSON: {}", e))
-        })
+        // Response is already a JSON value
+        Ok(response)
     }
 
     /// Calculate combined score from resume and match scores.
     fn calculate_combined_score(
         &self,
         resume_score: &ScoreReport,
-        match_score: &Option<ScoreReport>,
+        match_score: Option<&ScoreReport>,
     ) -> f64 {
         if let Some(ms) = match_score {
             // Weighted average: 50% resume quality + 50% match quality
-            (resume_score.total + ms.total) / 2.0
+            f64::midpoint(resume_score.total, ms.total)
         } else {
             resume_score.total
         }
     }
 
     /// Process all new resumes in the input folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input folder cannot be read or listing resumes fails.
     pub async fn process_all_resumes(&mut self) -> Result<Vec<ProcessingResult>> {
-        let resume_paths = self.input_handler.list_files()?;
+        let resume_paths = self.input_handler.list_new_resumes(&self.state_manager)?;
         let mut results = Vec::new();
 
         log::info!("Found {} resumes to process", resume_paths.len());
@@ -527,15 +579,15 @@ mod tests {
     #[test]
     fn test_iteration_strategy_parsing() {
         assert_eq!(
-            IterationStrategy::from_str("best_of").unwrap(),
+            "best_of".parse::<IterationStrategy>().unwrap(),
             IterationStrategy::BestOf
         );
         assert_eq!(
-            IterationStrategy::from_str("first_hit").unwrap(),
+            "first_hit".parse::<IterationStrategy>().unwrap(),
             IterationStrategy::FirstHit
         );
         assert_eq!(
-            IterationStrategy::from_str("patience").unwrap(),
+            "patience".parse::<IterationStrategy>().unwrap(),
             IterationStrategy::Patience
         );
     }

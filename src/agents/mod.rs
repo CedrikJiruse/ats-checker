@@ -1,20 +1,20 @@
 //! LLM agent abstraction layer.
 //!
 //! This module provides a provider-agnostic interface for working with LLMs.
-//! It supports multiple providers (Gemini, OpenAI, Claude, Llama) through a
+//! It supports multiple providers (Gemini, `OpenAI`, Claude, Llama) through a
 //! unified Agent trait.
 //!
 //! # Agent Roles
 //!
 //! - **enhancer**: Converts raw resume text to structured JSON
-//! - **job_summarizer**: Summarizes job descriptions
+//! - **`job_summarizer`**: Summarizes job descriptions
 //! - **scorer**: Scores resumes (currently deterministic, not LLM-based)
 //! - **reviser**: Iteratively improves resumes based on feedback
 //!
 //! # Example
 //!
 //! ```no_run
-//! use ats_checker::agents::{AgentConfig, GeminiAgent};
+//! use ats_checker::agents::{Agent, AgentConfig, GeminiAgent};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,7 +25,7 @@
 //!         .build();
 //!
 //!     let agent = GeminiAgent::from_env(config)?;
-//!     let result = agent.generate_json("Enhance this resume: John Doe, Engineer").await?;
+//!     let result: serde_json::Value = agent.generate_json("Enhance this resume: John Doe, Engineer").await?;
 //!     println!("{}", serde_json::to_string_pretty(&result)?);
 //!     Ok(())
 //! }
@@ -51,7 +51,7 @@ pub struct AgentConfig {
     #[serde(default = "default_provider")]
     pub provider: String,
 
-    /// Agent role (e.g., "resume_enhancement", "job_summary").
+    /// Agent role (e.g., "`resume_enhancement`", "`job_summary`").
     #[serde(default = "default_role")]
     pub role: String,
 
@@ -139,13 +139,13 @@ impl Default for AgentConfig {
 }
 
 impl AgentConfig {
-    /// Create a builder for AgentConfig.
+    /// Create a builder for `AgentConfig`.
     pub fn builder() -> AgentConfigBuilder {
         AgentConfigBuilder::default()
     }
 }
 
-/// Builder for AgentConfig.
+/// Builder for `AgentConfig`.
 #[derive(Default)]
 pub struct AgentConfigBuilder {
     name: Option<String>,
@@ -162,61 +162,84 @@ pub struct AgentConfigBuilder {
 }
 
 impl AgentConfigBuilder {
+    /// Set the agent name.
+    #[must_use]
     pub fn name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self
     }
 
+    /// Set the provider (e.g., "gemini", "openai").
+    #[must_use]
     pub fn provider(mut self, provider: impl Into<String>) -> Self {
         self.provider = Some(provider.into());
         self
     }
 
+    /// Set the agent role (e.g., "`resume_enhancement`").
+    #[must_use]
     pub fn role(mut self, role: impl Into<String>) -> Self {
         self.role = Some(role.into());
         self
     }
 
+    /// Set the model name (e.g., "gemini-1.5-flash").
+    #[must_use]
     pub fn model_name(mut self, model: impl Into<String>) -> Self {
         self.model_name = Some(model.into());
         self
     }
 
+    /// Set the temperature (0.0-2.0).
+    #[must_use]
     pub fn temperature(mut self, temp: f64) -> Self {
         self.temperature = Some(temp);
         self
     }
 
+    /// Set top-p sampling parameter.
+    #[must_use]
     pub fn top_p(mut self, p: f64) -> Self {
         self.top_p = Some(p);
         self
     }
 
+    /// Set top-k sampling parameter.
+    #[must_use]
     pub fn top_k(mut self, k: i32) -> Self {
         self.top_k = Some(k);
         self
     }
 
+    /// Set maximum output tokens.
+    #[must_use]
     pub fn max_output_tokens(mut self, tokens: i32) -> Self {
         self.max_output_tokens = Some(tokens);
         self
     }
 
+    /// Set maximum retry attempts.
+    #[must_use]
     pub fn max_retries(mut self, retries: i32) -> Self {
         self.max_retries = Some(retries);
         self
     }
 
+    /// Set whether to retry on empty responses.
+    #[must_use]
     pub fn retry_on_empty(mut self, retry: bool) -> Self {
         self.retry_on_empty = Some(retry);
         self
     }
 
+    /// Set whether JSON output is required.
+    #[must_use]
     pub fn require_json(mut self, require: bool) -> Self {
         self.require_json = Some(require);
         self
     }
 
+    /// Build the `AgentConfig`.
     pub fn build(self) -> AgentConfig {
         let defaults = AgentConfig::default();
 
@@ -266,6 +289,10 @@ pub struct GeminiAgent {
 
 impl GeminiAgent {
     /// Create a new Gemini agent from environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `GEMINI_API_KEY` environment variable is not set.
     pub fn from_env(config: AgentConfig) -> Result<Self> {
         let generation_config = GenerationConfig {
             temperature: Some(config.temperature),
@@ -281,6 +308,10 @@ impl GeminiAgent {
     }
 
     /// Create a new Gemini agent with explicit API key.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API key is invalid or the model name is not supported.
     pub fn new(api_key: impl Into<String>, config: AgentConfig) -> Result<Self> {
         let generation_config = GenerationConfig {
             temperature: Some(config.temperature),
@@ -350,7 +381,7 @@ impl Agent for GeminiAgent {
             let cleaned = strip_markdown_fences(&text);
             serde_json::from_str::<serde_json::Value>(&cleaned).map_err(|e| {
                 AtsError::ApiResponse {
-                    message: format!("Response is not valid JSON: {}", e),
+                    message: format!("Response is not valid JSON: {e}"),
                     status_code: None,
                 }
             })?;
@@ -368,8 +399,7 @@ impl Agent for GeminiAgent {
             prompt.to_string()
         } else {
             format!(
-                "{}\n\nIMPORTANT: Output MUST be a raw JSON object only. No markdown fences. No commentary.",
-                prompt
+                "{prompt}\n\nIMPORTANT: Output MUST be a raw JSON object only. No markdown fences. No commentary."
             )
         };
 
@@ -377,7 +407,7 @@ impl Agent for GeminiAgent {
         let cleaned = strip_markdown_fences(&text);
 
         serde_json::from_str(&cleaned).map_err(|e| AtsError::ApiResponse {
-            message: format!("Failed to parse JSON: {}", e),
+            message: format!("Failed to parse JSON: {e}"),
             status_code: None,
         })
     }
@@ -406,18 +436,22 @@ impl AgentRegistry {
     }
 
     /// Get an agent by name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no agent with the given name is registered.
     pub fn get(&self, name: &str) -> Result<&dyn Agent> {
         self.agents
             .get(name)
-            .map(|a| a.as_ref())
+            .map(std::convert::AsRef::as_ref)
             .ok_or_else(|| AtsError::AgentConfig {
-                message: format!("Agent '{}' not found", name),
+                message: format!("Agent '{name}' not found"),
             })
     }
 
     /// List all agent names.
     pub fn list(&self) -> Vec<&str> {
-        self.agents.keys().map(|k| k.as_str()).collect()
+        self.agents.keys().map(std::string::String::as_str).collect()
     }
 
     /// Create a registry from a config map.
@@ -430,6 +464,12 @@ impl AgentRegistry {
     /// role = "resume_enhancement"
     /// require_json = true
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - An unsupported provider is specified
+    /// - Agent initialization fails (e.g., missing API keys)
     pub fn from_config(agents_config: &HashMap<String, AgentConfig>) -> Result<Self> {
         let mut registry = Self::new();
 
@@ -438,7 +478,7 @@ impl AgentRegistry {
                 "gemini" => Box::new(GeminiAgent::from_env(config.clone())?),
                 other => {
                     return Err(AtsError::NotSupported {
-                        message: format!("Provider '{}' not yet supported", other),
+                        message: format!("Provider '{other}' not yet supported"),
                     })
                 }
             };
@@ -510,7 +550,7 @@ mod tests {
 
     #[test]
     fn test_agent_registry_operations() {
-        let mut registry = AgentRegistry::new();
+        let registry = AgentRegistry::new();
         assert!(registry.list().is_empty());
 
         // We can't easily test agent registration without mocking

@@ -6,7 +6,7 @@
 //!
 //! This library provides functionality to:
 //! - Parse and process resumes from various formats (TXT, PDF, DOCX)
-//! - Enhance resumes using AI models (Gemini, OpenAI, Anthropic, Llama)
+//! - Enhance resumes using AI models (Gemini, `OpenAI`, Anthropic, Llama)
 //! - Score resumes against job descriptions
 //! - Scrape job postings from various job boards
 //! - Generate optimized output in multiple formats
@@ -52,6 +52,18 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::map_clone)]
+#![allow(clippy::struct_excessive_bools)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::unused_self)]
+#![allow(clippy::float_cmp)]
+#![allow(clippy::match_same_arms)]
 
 // Public modules
 pub mod agents;
@@ -87,9 +99,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Default configuration file path
 pub const DEFAULT_CONFIG_PATH: &str = "config/config.toml";
 
-/// Prelude module for convenient imports
 pub mod prelude {
-    //! Convenient imports for common use cases.
+    //! Prelude module for convenient imports.
     //!
     //! ```rust
     //! use ats_checker::prelude::*;

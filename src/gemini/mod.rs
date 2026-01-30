@@ -93,6 +93,7 @@ struct GenerateContentResponse {
 struct Candidate {
     content: ContentResponse,
     #[serde(default)]
+    #[allow(dead_code)]
     finish_reason: Option<String>,
 }
 
@@ -109,6 +110,7 @@ struct PartResponse {
 }
 
 /// Gemini API client.
+#[derive(Debug)]
 pub struct GeminiClient {
     api_key: String,
     model_name: String,
@@ -123,6 +125,10 @@ impl GeminiClient {
     ///
     /// * `api_key` - Gemini API key
     /// * `model_name` - Model to use (e.g., "gemini-1.5-flash", "gemini-1.5-pro")
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API key is empty or invalid.
     pub fn new(api_key: impl Into<String>, model_name: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
 
@@ -136,7 +142,7 @@ impl GeminiClient {
             .timeout(DEFAULT_TIMEOUT)
             .build()
             .map_err(|e| AtsError::ApiRequest {
-                message: format!("Failed to build HTTP client: {}", e),
+                message: format!("Failed to build HTTP client: {e}"),
                 source: Some(e),
             })?;
 
@@ -149,6 +155,10 @@ impl GeminiClient {
     }
 
     /// Create a client from the `GEMINI_API_KEY` environment variable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `GEMINI_API_KEY` environment variable is not set.
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| AtsError::ApiAuth {
             message: "GEMINI_API_KEY environment variable not set".to_string(),
@@ -158,6 +168,10 @@ impl GeminiClient {
     }
 
     /// Create a client with a specific model from environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `GEMINI_API_KEY` environment variable is not set.
     pub fn from_env_with_model(model_name: impl Into<String>) -> Result<Self> {
         let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| AtsError::ApiAuth {
             message: "GEMINI_API_KEY environment variable not set".to_string(),
@@ -167,30 +181,35 @@ impl GeminiClient {
     }
 
     /// Set the generation configuration.
+    #[must_use]
     pub fn with_generation_config(mut self, config: GenerationConfig) -> Self {
         self.generation_config = config;
         self
     }
 
     /// Set the temperature.
+    #[must_use]
     pub fn with_temperature(mut self, temperature: f64) -> Self {
         self.generation_config.temperature = Some(temperature);
         self
     }
 
-    /// Set the top_p parameter.
+    /// Set the `top_p` parameter.
+    #[must_use]
     pub fn with_top_p(mut self, top_p: f64) -> Self {
         self.generation_config.top_p = Some(top_p);
         self
     }
 
-    /// Set the top_k parameter.
+    /// Set the `top_k` parameter.
+    #[must_use]
     pub fn with_top_k(mut self, top_k: i32) -> Self {
         self.generation_config.top_k = Some(top_k);
         self
     }
 
     /// Set the maximum output tokens.
+    #[must_use]
     pub fn with_max_output_tokens(mut self, max_tokens: i32) -> Self {
         self.generation_config.max_output_tokens = Some(max_tokens);
         self
@@ -199,6 +218,10 @@ impl GeminiClient {
     /// Generate content from a text prompt.
     ///
     /// This is the main method for interacting with the Gemini API.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API request fails or the response cannot be parsed.
     pub async fn generate_content(&self, prompt: &str) -> Result<String> {
         if prompt.trim().is_empty() {
             return Err(AtsError::ApiRequest {
@@ -228,7 +251,7 @@ impl GeminiClient {
             .send()
             .await
             .map_err(|e| AtsError::ApiRequest {
-                message: format!("Failed to send request to Gemini API: {}", e),
+                message: format!("Failed to send request to Gemini API: {e}"),
                 source: Some(e),
             })?;
 
@@ -242,14 +265,14 @@ impl GeminiClient {
 
             return Err(match status.as_u16() {
                 401 | 403 => AtsError::ApiAuth {
-                    message: format!("Authentication failed: {}", error_text),
+                    message: format!("Authentication failed: {error_text}"),
                 },
                 429 => AtsError::ApiRateLimit {
-                    message: format!("Rate limit exceeded: {}", error_text),
+                    message: format!("Rate limit exceeded: {error_text}"),
                     retry_after: None,
                 },
                 _ => AtsError::ApiResponse {
-                    message: format!("API error ({}): {}", status, error_text),
+                    message: format!("API error ({status}): {error_text}"),
                     status_code: Some(status.as_u16()),
                 },
             });
@@ -257,7 +280,7 @@ impl GeminiClient {
 
         let response_data: GenerateContentResponse =
             response.json().await.map_err(|e| AtsError::ApiResponse {
-                message: format!("Failed to parse API response: {}", e),
+                message: format!("Failed to parse API response: {e}"),
                 status_code: None,
             })?;
 
@@ -285,12 +308,16 @@ impl GeminiClient {
     /// Generate JSON content from a prompt.
     ///
     /// This method automatically strips markdown code fences and parses JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API request fails or the response is not valid JSON.
     pub async fn generate_json(&self, prompt: &str) -> Result<serde_json::Value> {
         let text = self.generate_content(prompt).await?;
         let cleaned = strip_markdown_fences(&text);
 
         serde_json::from_str(&cleaned).map_err(|e| AtsError::ApiResponse {
-            message: format!("Failed to parse JSON from response: {}", e),
+            message: format!("Failed to parse JSON from response: {e}"),
             status_code: None,
         })
     }

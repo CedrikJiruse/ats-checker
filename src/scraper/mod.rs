@@ -1,7 +1,7 @@
 //! Job scraping module.
 //!
 //! This module provides functionality for scraping job postings from various
-//! job boards including LinkedIn, Indeed, Glassdoor, Google Jobs, and ZipRecruiter.
+//! job boards including `LinkedIn`, Indeed, Glassdoor, Google Jobs, and `ZipRecruiter`.
 //!
 //! # Core Types
 //!
@@ -31,11 +31,16 @@
 //! }
 //! ```
 
+pub mod cache;
+pub mod jobspy;
 mod manager;
+pub mod retry;
 mod saved_search;
 mod types;
 
+pub use cache::{CacheConfig, CacheWrapper};
 pub use manager::JobScraperManager;
+pub use retry::{RetryConfig, RetryWrapper};
 pub use saved_search::SavedSearchManager;
 pub use types::{JobPosting, JobSource, SavedSearch, SearchFilters};
 
@@ -48,7 +53,7 @@ use async_trait::async_trait;
 #[async_trait]
 pub trait JobScraper: Send + Sync {
     /// Get the name of this scraper.
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// Search for jobs matching the given filters.
     async fn search_jobs(

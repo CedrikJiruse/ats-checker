@@ -18,6 +18,10 @@ impl SavedSearchManager {
     /// Create a new saved search manager.
     ///
     /// Loads existing saved searches from the file if it exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the saved searches file exists but cannot be read or parsed.
     pub fn new(file_path: impl AsRef<Path>) -> Result<Self> {
         let file_path = file_path.as_ref().to_path_buf();
         let searches = if file_path.exists() {
@@ -33,6 +37,10 @@ impl SavedSearchManager {
     }
 
     /// Save a search configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be written or serialization fails.
     pub fn save(&mut self, search: SavedSearch) -> Result<()> {
         self.searches.insert(search.name.clone(), search);
         self.persist()
@@ -54,12 +62,20 @@ impl SavedSearchManager {
     }
 
     /// Delete a saved search.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be written after deletion.
     pub fn delete(&mut self, name: &str) -> Result<()> {
         self.searches.remove(name);
         self.persist()
     }
 
     /// Update the last run timestamp for a search.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be written after updating.
     pub fn update_last_run(&mut self, name: &str) -> Result<()> {
         if let Some(search) = self.searches.get_mut(name) {
             search.update_last_run();

@@ -49,6 +49,9 @@ hex = "0.4"
 # PDF extraction
 pdf-extract = "0.8"
 
+# DOCX extraction
+docx-rs = "0.4"
+
 # Regex
 regex = "1.10"
 
@@ -68,6 +71,7 @@ walkdir = "2.5"
 dialoguer = "0.11"
 indicatif = "0.17"
 console = "0.15"
+comfy-table = "7.1"
 
 # Async utilities
 futures = "0.3"
@@ -81,6 +85,9 @@ url = "2.5"
 
 # Lazy initialization
 once_cell = "1.20"
+
+# Signal handling
+ctrlc = "3.4"
 
 [dev-dependencies]
 # Testing utilities
@@ -103,10 +110,17 @@ ocr = []
 # Enable all providers
 all-providers = []
 
-# Benchmarks will be added later
-# [[bench]]
-# name = "scoring"
-# harness = false
+[[bench]]
+name = "hashing"
+harness = false
+
+[[bench]]
+name = "scoring"
+harness = false
+
+[[bench]]
+name = "toml_io"
+harness = false
 
 [profile.release]
 lto = true
@@ -121,3 +135,7 @@ debug = true
 [profile.test]
 opt-level = 0
 debug = true
+
+[profile.bench]
+opt-level = 3
+debug = false

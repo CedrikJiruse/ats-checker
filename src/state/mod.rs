@@ -30,6 +30,10 @@ impl StateManager {
     /// Create a new state manager.
     ///
     /// Loads existing state from the file if it exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the state file exists but cannot be read or parsed.
     pub fn new(state_filepath: impl AsRef<Path>) -> Result<Self> {
         let state_filepath = state_filepath.as_ref().to_path_buf();
         let state = Self::load_state(&state_filepath)?;
@@ -46,6 +50,10 @@ impl StateManager {
     }
 
     /// Update the state for a processed resume.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the state file cannot be written.
     pub fn update_resume_state(&mut self, file_hash: &str, output_path: &str) -> Result<()> {
         self.state.insert(
             file_hash.to_string(),
@@ -62,12 +70,20 @@ impl StateManager {
     }
 
     /// Remove state for a resume.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the state file cannot be written after removal.
     pub fn remove_state(&mut self, file_hash: &str) -> Result<()> {
         self.state.remove(file_hash);
         self.save_state()
     }
 
     /// Clear all state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the state file cannot be written after clearing.
     pub fn clear_all(&mut self) -> Result<()> {
         self.state.clear();
         self.save_state()
@@ -89,7 +105,7 @@ impl StateManager {
             // Try legacy JSON migration
             let json_path = path.with_extension("json");
             if json_path.exists() {
-                log::info!("Migrating legacy JSON state from {:?}", json_path);
+                log::info!("Migrating legacy JSON state from {}", json_path.display());
                 return Self::load_legacy_json(&json_path);
             }
             return Ok(HashMap::new());
@@ -128,7 +144,7 @@ impl StateManager {
         std::fs::write(&temp_path, toml_str)?;
         std::fs::rename(&temp_path, &self.state_filepath)?;
 
-        log::debug!("State saved to {:?}", self.state_filepath);
+        log::debug!("State saved to {}", self.state_filepath.display());
         Ok(())
     }
 }

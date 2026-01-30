@@ -1,6 +1,6 @@
 //! Core types for job scraping.
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -106,42 +106,49 @@ impl JobPosting {
     }
 
     /// Set the posted date.
+    #[must_use]
     pub fn with_posted_date(mut self, date: impl Into<String>) -> Self {
         self.posted_date = Some(date.into());
         self
     }
 
     /// Set the salary information.
+    #[must_use]
     pub fn with_salary(mut self, salary: impl Into<String>) -> Self {
         self.salary = Some(salary.into());
         self
     }
 
     /// Set the job type.
+    #[must_use]
     pub fn with_job_type(mut self, job_type: impl Into<String>) -> Self {
         self.job_type = Some(job_type.into());
         self
     }
 
     /// Set whether the job is remote.
+    #[must_use]
     pub fn with_remote(mut self, remote: bool) -> Self {
         self.remote = Some(remote);
         self
     }
 
     /// Set the experience level.
+    #[must_use]
     pub fn with_experience_level(mut self, level: impl Into<String>) -> Self {
         self.experience_level = Some(level.into());
         self
     }
 
     /// Set the job score.
+    #[must_use]
     pub fn with_score(mut self, score: f64) -> Self {
         self.job_score = Some(score);
         self
     }
 
     /// Add metadata.
+    #[must_use]
     pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
         self.metadata.insert(key.into(), value);
         self
@@ -352,6 +359,7 @@ impl SavedSearch {
     }
 
     /// Set the maximum number of results.
+    #[must_use]
     pub fn with_max_results(mut self, max: i32) -> Self {
         self.max_results = max;
         self
@@ -367,7 +375,7 @@ impl SavedSearch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum JobSource {
-    /// LinkedIn Jobs
+    /// `LinkedIn` Jobs
     LinkedIn,
     /// Indeed
     Indeed,
@@ -375,7 +383,7 @@ pub enum JobSource {
     Glassdoor,
     /// Google Jobs
     Google,
-    /// ZipRecruiter
+    /// `ZipRecruiter`
     ZipRecruiter,
 }
 
@@ -419,7 +427,7 @@ impl std::str::FromStr for JobSource {
             "glassdoor" => Ok(JobSource::Glassdoor),
             "google" => Ok(JobSource::Google),
             "ziprecruiter" => Ok(JobSource::ZipRecruiter),
-            _ => Err(format!("Unknown job source: {}", s)),
+            _ => Err(format!("Unknown job source: {s}")),
         }
     }
 }
@@ -465,13 +473,13 @@ mod tests {
             .keywords("rust developer")
             .location("San Francisco")
             .remote_only(true)
-            .salary_min(100000)
+            .salary_min(100_000)
             .build();
 
         assert_eq!(filters.keywords, Some("rust developer".to_string()));
         assert_eq!(filters.location, Some("San Francisco".to_string()));
         assert!(filters.remote_only);
-        assert_eq!(filters.salary_min, Some(100000));
+        assert_eq!(filters.salary_min, Some(100_000));
     }
 
     #[test]
