@@ -108,6 +108,7 @@ pub async fn run_interactive_menu(config: Config) -> Result<()> {
         println!("7. Settings");
         println!("8. Test OCR");
         println!("9. View history");
+        println!("10. Check API keys");
         println!("0. Exit (or press 'q')");
         println!("{}", "-".repeat(60));
 
@@ -189,6 +190,10 @@ pub async fn run_interactive_menu(config: Config) -> Result<()> {
             }
             "9" => {
                 view_history(&history);
+            }
+            "10" => {
+                check_api_keys_menu();
+                history.add("Check API keys");
             }
             _ => {
                 println!("Invalid choice. Please try again.");
@@ -1174,4 +1179,59 @@ fn view_history(history: &OperationHistory) {
     }
 
     println!("{}", "-".repeat(60));
+}
+
+// -------------------------
+// Check API Keys Menu
+// -------------------------
+
+/// Check and display status of all API keys.
+fn check_api_keys_menu() {
+    println!("\n{}", "-".repeat(60));
+    println!("API KEYS STATUS");
+    println!("{}", "-".repeat(60));
+
+    let keys = [
+        ("GEMINI_API_KEY", "Google Gemini"),
+        ("OPENAI_API_KEY", "OpenAI"),
+        ("ANTHROPIC_API_KEY", "Anthropic Claude"),
+        ("OLLAMA_HOST", "Ollama (optional)"),
+    ];
+
+    let mut found_count = 0;
+    let mut missing_count = 0;
+
+    println!();
+    for (env_var, name) in &keys {
+        match std::env::var(env_var) {
+            Ok(value) => {
+                let masked = if value.len() > 8 {
+                    format!("{}...{}", &value[..4], &value[value.len() - 4..])
+                } else {
+                    "****".to_string()
+                };
+                println!("  [✓] {name}: {masked}");
+                found_count += 1;
+            }
+            Err(_) => {
+                if *env_var == "OLLAMA_HOST" {
+                    println!("  [○] {name}: Not set (will use default: http://localhost:11434)");
+                } else {
+                    println!("  [✗] {name}: Not found");
+                    missing_count += 1;
+                }
+            }
+        }
+    }
+
+    println!();
+    println!("Summary: {found_count} found, {missing_count} missing");
+    println!("{}", "-".repeat(60));
+
+    if missing_count > 0 {
+        println!("\nTo set environment variables on Windows:");
+        println!("  Command Prompt: set KEY_NAME=your_key_value");
+        println!("  PowerShell:     $env:KEY_NAME=\"your_key_value\"");
+        println!("\nFor permanent setup, use System Properties → Environment Variables");
+    }
 }
