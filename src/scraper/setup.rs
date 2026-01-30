@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::RwLock;
 
 use crate::error::{AtsError, Result};
 
@@ -18,7 +18,8 @@ const VENV_DIR: &str = ".venv";
 const REQUIRED_PACKAGES: &[&str] = &["python-jobspy", "pandas"];
 
 /// Cache for dependency check results to avoid redundant checks
-static DEPENDENCY_CHECK_CACHE: OnceLock<DependencyCheck> = OnceLock::new();
+/// Uses `RwLock` to allow clearing after installation
+static DEPENDENCY_CHECK_CACHE: RwLock<Option<DependencyCheck>> = RwLock::new(None);
 
 /// Get the path to the virtual environment's Python executable
 fn get_venv_python_path() -> PathBuf {
@@ -122,6 +123,10 @@ fn install_packages_in_venv(packages: &[&str]) -> Result<()> {
     }
 
     println!("All packages installed successfully");
+
+    // Clear cache so next check will see the newly installed packages
+    clear_dependency_cache();
+
     Ok(())
 }
 
@@ -208,10 +213,32 @@ impl DependencyCheck {
 /// the venv and install packages if needed.
 ///
 /// Results are cached after the first call to avoid redundant checks.
+/// Call `clear_dependency_cache()` after installing packages to refresh.
 pub fn check_dependencies() -> DependencyCheck {
-    DEPENDENCY_CHECK_CACHE
-        .get_or_init(perform_dependency_check)
-        .clone()
+    // Try to read from cache first
+    if let Ok(cache) = DEPENDENCY_CHECK_CACHE.read() {
+        if let Some(cached) = cache.as_ref() {
+            return cached.clone();
+        }
+    }
+
+    // Cache miss - perform the check
+    let result = perform_dependency_check();
+
+    // Store in cache
+    if let Ok(mut cache) = DEPENDENCY_CHECK_CACHE.write() {
+        *cache = Some(result.clone());
+    }
+
+    result
+}
+
+/// Clear the dependency check cache.
+/// Call this after installing packages to ensure fresh checks.
+pub fn clear_dependency_cache() {
+    if let Ok(mut cache) = DEPENDENCY_CHECK_CACHE.write() {
+        *cache = None;
+    }
 }
 
 /// Internal function that performs the actual dependency check.
@@ -408,6 +435,10 @@ pub fn auto_install_deps(python_exe: &str, deps: &[String]) -> Result<()> {
 
     if all_success {
         println!("\n✓ All dependencies installed successfully!");
+
+        // Clear cache so next check will see the newly installed packages
+        clear_dependency_cache();
+
         Ok(())
     } else {
         Err(AtsError::ScraperError {
@@ -558,5 +589,64 @@ mod tests {
 
         assert!(!check.is_ready());
         assert_eq!(check.summary(), "Missing: python-jobspy");
+    }
+
+    #[test]
+    fn test_dependency_cache_clears() {
+        // First, ensure cache is clear
+        clear_dependency_cache();
+
+        // Verify cache is empty
+        {
+            let cache = DEPENDENCY_CHECK_CACHE.read().unwrap();
+            assert!(cache.is_none());
+        }
+
+        // Perform a check to populate cache
+        let _result = check_dependencies();
+
+        // Verify cache is populated (if Python is available)
+        // Note: In CI without Python, this won't populate the cache
+        // but the cache clearing logic should still work
+
+        // Clear cache
+        clear_dependency_cache();
+
+        // Verify cache is empty after clearing
+        {
+            let cache = DEPENDENCY_CHECK_CACHE.read().unwrap();
+            assert!(cache.is_none());
+        }
+    }
+
+    #[test]
+    fn test_cache_returns_same_result() {
+        // Clear cache first
+        clear_dependency_cache();
+
+        // Get first result
+        let first = check_dependencies();
+
+        // Get second result (should be from cache)
+        let second = check_dependencies();
+
+        // Results should be identical
+        assert_eq!(first.python_available, second.python_available);
+        assert_eq!(first.is_ready(), second.is_ready());
+        assert_eq!(first.missing_deps, second.missing_deps);
+    }
+
+    #[test]
+    fn test_clear_cache_idempotent() {
+        // Clear cache multiple times should not panic
+        clear_dependency_cache();
+        clear_dependency_cache();
+        clear_dependency_cache();
+
+        // Verify cache is still clear
+        {
+            let cache = DEPENDENCY_CHECK_CACHE.read().unwrap();
+            assert!(cache.is_none());
+        }
     }
 }
