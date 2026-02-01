@@ -183,11 +183,20 @@ fn check_venv_package(package: &str) -> bool {
     if let Ok(result) = &output {
         let success = result.status.success();
         debug!("Package '{}' import success: {}", package, success);
-        if !success {
-            #[cfg(feature = "debug")]
-            {
-                let stderr = String::from_utf8_lossy(&result.stderr);
-                debug!("Package '{}' import stderr: {}", package, stderr);
+        debug!(
+            "Package '{}' exit code: {:?}",
+            package,
+            result.status.code()
+        );
+        #[cfg(feature = "debug")]
+        {
+            let stdout = String::from_utf8_lossy(&result.stdout);
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            if !stdout.is_empty() {
+                debug!("Package '{}' stdout: {}", package, stdout);
+            }
+            if !stderr.is_empty() {
+                debug!("Package '{}' stderr: {}", package, stderr);
             }
         }
         debug_exit!("check_venv_package");
