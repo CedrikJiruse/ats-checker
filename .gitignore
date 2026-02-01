@@ -38,6 +38,7 @@ job_search_results/
 workspace/
 data/processed_resumes_state.toml
 WARP.md
+logs/
 
 # Claude
 .claude/
