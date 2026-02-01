@@ -111,6 +111,32 @@ async fn main() {
                 }
             }
         }
+
+        // Quick job search subcommand (simplified with defaults)
+        Some(ats_checker::cli::Commands::QuickJobSearch {
+            keywords,
+            location,
+            remote,
+        }) => {
+            let sources = vec!["linkedin".to_string()];
+            match handlers::handle_job_search(
+                &keywords,
+                location.as_deref(),
+                &sources,
+                50,
+                remote,
+                None,
+                &config,
+            )
+            .await
+            {
+                Ok(code) => code,
+                Err(e) => {
+                    eprintln!("Error searching jobs: {}", e);
+                    1
+                }
+            }
+        }
     };
 
     process::exit(exit_code);

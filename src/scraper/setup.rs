@@ -185,14 +185,14 @@ fn check_venv_package(package: &str) -> bool {
             let success = result.status.success();
             debug!("Package '{}' import success: {}", package, success);
             if !success {
-                let _stderr = String::from_utf8_lossy(&result.stderr);
-                debug!("Package '{}' import stderr: {}", package, _stderr);
+                let stderr = String::from_utf8_lossy(&result.stderr);
+                debug!("Package '{}' import stderr: {}", package, stderr);
             }
             debug_exit!("check_venv_package");
             success
         }
-        Err(_e) => {
-            debug!("Failed to run import check for '{}': {}", package, _e);
+        Err(e) => {
+            debug!("Failed to run import check for '{}': {}", package, e);
             debug_exit!("check_venv_package");
             false
         }
@@ -335,7 +335,9 @@ fn perform_dependency_check() -> DependencyCheck {
     debug!("Checking if virtual environment exists");
     let venv_exists_result = venv_exists();
     debug_var!("venv_exists", &venv_exists_result);
-    if !venv_exists_result {
+    if venv_exists_result {
+        debug!("Virtual environment already exists");
+    } else {
         println!("Virtual environment not found. Creating one...");
         debug!("Virtual environment not found, attempting to create");
         if let Err(_e) = create_venv(&python_exe) {
@@ -378,8 +380,6 @@ fn perform_dependency_check() -> DependencyCheck {
             return result;
         }
         debug!("Packages installed successfully");
-    } else {
-        debug!("Virtual environment already exists");
     }
 
     // Check for required packages in venv
