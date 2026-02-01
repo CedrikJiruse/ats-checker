@@ -109,6 +109,8 @@ default = []
 ocr = []
 # Enable all providers
 all-providers = []
+# Enable debug/trace output for troubleshooting
+debug = []
 
 [[bench]]
 name = "hashing"

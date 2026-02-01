@@ -73,6 +73,7 @@ pub mod agents;
 pub mod anthropic;
 pub mod cli;
 pub mod config;
+mod debug;
 pub mod error;
 pub mod gemini;
 pub mod input;

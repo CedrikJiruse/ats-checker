@@ -38,17 +38,32 @@ Output JSON format:
 """
 
 import json
+import os
 import sys
 import warnings
 from typing import Dict, List, Any, Optional
+
+# Debug mode - set JOBSPY_DEBUG=1 to enable
+DEBUG = os.environ.get("JOBSPY_DEBUG", "0") == "1"
+
+def debug_print(msg: str):
+    """Print debug message if DEBUG is enabled."""
+    if DEBUG:
+        print(f"[DEBUG] {msg}", file=sys.stderr, flush=True)
 
 # Suppress numpy warnings on Windows MINGW-W64
 warnings.filterwarnings("ignore", message="Numpy built with MINGW-W64")
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
+debug_print("JobSpy Bridge starting...")
+debug_print(f"Python version: {sys.version}")
+
 try:
+    debug_print("Importing jobspy...")
     from jobspy import scrape_jobs
-except ImportError:
+    debug_print("JobSpy imported successfully")
+except ImportError as e:
+    debug_print(f"Failed to import jobspy: {e}")
     print(json.dumps({
         "success": False,
         "error": "JobSpy not installed. Run: pip install python-jobspy"
@@ -67,6 +82,8 @@ def search_jobs(params: Dict[str, Any]) -> Dict[str, Any]:
         Dictionary with success status and job results
     """
     try:
+        debug_print(f"search_jobs started with params: {params}")
+        
         source = params.get("source", "linkedin")
         keywords = params.get("keywords", "")
         location = params.get("location", "")
@@ -84,6 +101,7 @@ def search_jobs(params: Dict[str, Any]) -> Dict[str, Any]:
         }
         
         site = site_map.get(source, "linkedin")
+        debug_print(f"Mapped site name: {site} (from source: {source})")
         
         # Build JobSpy parameters
         jobspy_params = {
@@ -99,7 +117,10 @@ def search_jobs(params: Dict[str, Any]) -> Dict[str, Any]:
         if hours is not None:
             jobspy_params["hours_old"] = hours
         
+        debug_print(f"jobspy_params dict: {jobspy_params}")
+        
         # Call JobSpy
+        debug_print("Calling scrape_jobs...")
         jobs_df = scrape_jobs(**jobspy_params)
         
         # Convert DataFrame to list of dictionaries
@@ -117,6 +138,8 @@ def search_jobs(params: Dict[str, Any]) -> Dict[str, Any]:
             }
             jobs.append(job)
         
+        debug_print(f"Found {len(jobs)} jobs")
+        
         return {
             "success": True,
             "jobs": jobs,
@@ -124,6 +147,7 @@ def search_jobs(params: Dict[str, Any]) -> Dict[str, Any]:
         }
         
     except Exception as e:
+        debug_print(f"search_jobs encountered error: {e}")
         return {
             "success": False,
             "error": str(e)
@@ -146,10 +170,16 @@ def get_hours_old(date_posted: Optional[str]) -> Optional[int]:
 
 def main():
     """Main entry point."""
+    debug_print("main function started")
+    
     try:
         # Read JSON from stdin
         input_data = sys.stdin.read()
+        debug_print(f"Received input: {input_data[:500]}{'...' if len(input_data) > 500 else ''}")
+        
+        debug_print("Parsing JSON input...")
         params = json.loads(input_data)
+        debug_print(f"JSON parsed successfully, params: {params}")
         
         # Search for jobs
         result = search_jobs(params)
@@ -158,12 +188,14 @@ def main():
         print(json.dumps(result, indent=2))
         
     except json.JSONDecodeError as e:
+        debug_print(f"JSON decode error: {e}")
         print(json.dumps({
             "success": False,
             "error": f"Invalid JSON input: {e}"
         }), file=sys.stderr)
         sys.exit(1)
     except Exception as e:
+        debug_print(f"Unexpected error in main: {e}")
         print(json.dumps({
             "success": False,
             "error": f"Unexpected error: {e}"

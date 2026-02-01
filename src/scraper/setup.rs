@@ -11,6 +11,7 @@ use std::process::{Command, Stdio};
 use std::sync::RwLock;
 
 use crate::error::{AtsError, Result};
+use crate::{debug, debug_enter, debug_exit, debug_var};
 
 /// Name of the virtual environment directory
 const VENV_DIR: &str = ".venv";
@@ -23,25 +24,30 @@ static DEPENDENCY_CHECK_CACHE: RwLock<Option<DependencyCheck>> = RwLock::new(Non
 
 /// Get the path to the virtual environment's Python executable
 fn get_venv_python_path() -> PathBuf {
+    debug_enter!("get_venv_python_path");
     let venv_path = Path::new(VENV_DIR);
-
     #[cfg(windows)]
-    {
-        venv_path.join("Scripts").join("python.exe")
-    }
+    let result = venv_path.join("Scripts").join("python.exe");
     #[cfg(not(windows))]
-    {
-        venv_path.join("bin").join("python")
-    }
+    let result = venv_path.join("bin").join("python");
+    debug_var!("venv_python_path", &result);
+    debug_exit!("get_venv_python_path");
+    result
 }
 
 /// Check if the virtual environment exists
 fn venv_exists() -> bool {
-    get_venv_python_path().exists()
+    debug_enter!("venv_exists");
+    let path = get_venv_python_path();
+    debug!("venv path: {}, exists: {}", path.display(), path.exists());
+    debug_exit!("venv_exists");
+    path.exists()
 }
 
 /// Create a new virtual environment
 fn create_venv(python_exe: &str) -> Result<()> {
+    debug_enter!("create_venv");
+    debug!("Creating venv with Python: {}", python_exe);
     println!("Creating Python virtual environment in {VENV_DIR}...");
 
     let output = Command::new(python_exe)
@@ -49,13 +55,19 @@ fn create_venv(python_exe: &str) -> Result<()> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .map_err(|e| AtsError::ScraperError {
-            message: format!("Failed to create virtual environment: {e}"),
-            source: Some(Box::new(e)),
+        .map_err(|e| {
+            debug!("Failed to create venv: {}", e);
+            AtsError::ScraperError {
+                message: format!("Failed to create virtual environment: {e}"),
+                source: Some(Box::new(e)),
+            }
         })?;
+
+    debug!("venv creation exit status: {}", output.status);
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        debug!("venv creation stderr: {}", stderr);
         return Err(AtsError::ScraperError {
             message: format!("Failed to create virtual environment: {stderr}"),
             source: None,
@@ -63,17 +75,25 @@ fn create_venv(python_exe: &str) -> Result<()> {
     }
 
     println!("Virtual environment created successfully");
+    debug_exit!("create_venv");
     Ok(())
 }
 
 /// Install packages in the virtual environment
 fn install_packages_in_venv(packages: &[&str]) -> Result<()> {
+    debug_enter!("install_packages_in_venv");
+    debug!("Packages to install: {:?}", packages);
+
     let venv_python = get_venv_python_path();
+    debug!("venv_python path: {}", venv_python.display());
 
     // Use the venv Python to run pip as a module (more reliable)
     let python_exe = if venv_python.exists() {
-        venv_python.to_string_lossy().to_string()
+        let exe = venv_python.to_string_lossy().to_string();
+        debug!("Using venv Python: {}", exe);
+        exe
     } else {
+        debug!("venv Python not found at: {}", venv_python.display());
         return Err(AtsError::ScraperError {
             message: "Virtual environment Python not found".to_string(),
             source: None,
@@ -88,6 +108,7 @@ fn install_packages_in_venv(packages: &[&str]) -> Result<()> {
     for package in packages {
         print!("  Installing {package}... ");
         std::io::Write::flush(&mut std::io::stdout()).ok();
+        debug!("Installing package: {}", package);
 
         let result = Command::new(&python_exe)
             .args(["-m", "pip", "install", package, "--quiet"])
@@ -97,11 +118,14 @@ fn install_packages_in_venv(packages: &[&str]) -> Result<()> {
 
         match result {
             Ok(output) => {
+                debug!("pip exit status for {}: {}", package, output.status);
                 if output.status.success() {
                     println!("✓");
+                    debug!("Successfully installed {}", package);
                 } else {
                     println!("✗");
                     let stderr = String::from_utf8_lossy(&output.stderr);
+                    debug!("pip stderr for {}: {}", package, stderr);
                     eprintln!(
                         "    Error: {}",
                         stderr.lines().next().unwrap_or("Unknown error")
@@ -114,6 +138,7 @@ fn install_packages_in_venv(packages: &[&str]) -> Result<()> {
             }
             Err(e) => {
                 println!("✗");
+                debug!("pip command failed for {}: {}", package, e);
                 return Err(AtsError::ScraperError {
                     message: format!("Failed to run pip for {package}: {e}"),
                     source: Some(Box::new(e)),
@@ -123,10 +148,12 @@ fn install_packages_in_venv(packages: &[&str]) -> Result<()> {
     }
 
     println!("All packages installed successfully");
+    debug!("All packages installed, clearing cache");
 
     // Clear cache so next check will see the newly installed packages
     clear_dependency_cache();
 
+    debug_exit!("install_packages_in_venv");
     Ok(())
 }
 

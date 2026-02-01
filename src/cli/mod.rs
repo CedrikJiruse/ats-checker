@@ -28,6 +28,8 @@ use clap::{Parser, Subcommand};
     ats-checker score-match --resume output/resume.json --job jobs/software_engineer.txt\n\n  \
     # Rank jobs by score\n  \
     ats-checker rank-jobs --results workspace/search_results.toml --top 10\n\n\
+    # Quick job search with defaults\n  \
+    ats-checker quick-job-search --keywords \"rust developer\"\n\n\
     For more information, visit: https://github.com/your-repo/ats-checker")]
 pub struct Cli {
     /// Path to configuration file
@@ -202,5 +204,37 @@ pub enum Commands {
         #[arg(long_help = "Optional custom filename for saving results. \
             If not specified, a filename will be generated based on keywords and timestamp.")]
         output: Option<String>,
+    },
+
+    /// Quick job search with default parameters
+    #[command(name = "quick-job-search")]
+    #[command(about = "Quickly search for jobs using defaults")]
+    #[command(
+        long_about = "Quick job search using default parameters. Searches LinkedIn only \
+        with 50 results max. Perfect for quick searches without specifying many options. \
+        Requires Python and the python-jobspy package to be installed."
+    )]
+    #[command(after_help = "EXAMPLES:\n  \
+        # Quick search for any keyword\n  \
+        ats-checker quick-job-search --keywords \"rust developer\"\n\n  \
+        # Quick search with location\n  \
+        ats-checker quick-job-search --keywords \"software engineer\" --location \"New York\"\n\n  \
+        # Quick search for remote jobs\n  \
+        ats-checker quick-job-search --keywords \"data scientist\" --remote")]
+    QuickJobSearch {
+        /// Search keywords (job title, skills, etc.)
+        #[arg(long)]
+        #[arg(help = "Keywords to search for (e.g., \"software engineer\", \"rust developer\")")]
+        keywords: String,
+
+        /// Location filter
+        #[arg(long)]
+        #[arg(help = "Location to search in (e.g., \"San Francisco, CA\", \"Remote\")")]
+        location: Option<String>,
+
+        /// Only show remote jobs
+        #[arg(long)]
+        #[arg(help = "Filter to only remote positions")]
+        remote: bool,
     },
 }
