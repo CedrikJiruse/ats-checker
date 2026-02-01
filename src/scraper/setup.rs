@@ -180,22 +180,23 @@ fn check_venv_package(package: &str) -> bool {
         .stderr(Stdio::piped())
         .output();
 
-    match &output {
-        Ok(result) => {
-            let success = result.status.success();
-            debug!("Package '{}' import success: {}", package, success);
-            if !success {
+    if let Ok(result) = &output {
+        let success = result.status.success();
+        debug!("Package '{}' import success: {}", package, success);
+        if !success {
+            #[cfg(feature = "debug")]
+            {
                 let stderr = String::from_utf8_lossy(&result.stderr);
                 debug!("Package '{}' import stderr: {}", package, stderr);
             }
-            debug_exit!("check_venv_package");
-            success
         }
-        Err(e) => {
-            debug!("Failed to run import check for '{}': {}", package, e);
-            debug_exit!("check_venv_package");
-            false
-        }
+        debug_exit!("check_venv_package");
+        success
+    } else {
+        #[cfg(feature = "debug")]
+        debug!("Failed to run import check for '{}'", package);
+        debug_exit!("check_venv_package");
+        false
     }
 }
 
