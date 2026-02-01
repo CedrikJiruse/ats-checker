@@ -27,6 +27,7 @@ use serde_json::Value;
 use crate::error::{AtsError, Result};
 use crate::scraper::setup::{auto_install_deps, check_dependencies, get_python_exe};
 use crate::scraper::{JobPosting, JobScraper, JobSource, SearchFilters};
+use crate::debug;
 
 /// `JobSpy` scraper that executes Python subprocess.
 ///
@@ -248,13 +249,21 @@ impl JobSpyScraper {
             source: Some(Box::new(e)),
         })?;
 
+        debug!("Executing JobSpy search with Python: {}", self.python_exe);
+        debug!("Bridge script: {:?}", self.bridge_script);
+        debug!("Request JSON: {}", request_json);
+
         // Execute Python bridge script with stdin/stdout communication
         let output = tokio::task::spawn_blocking({
             let python_exe = self.python_exe.clone();
             let bridge_script = self.bridge_script.clone();
             let request_data = request_json.clone();
             move || {
-                let mut child = Command::new(python_exe)
+                debug!(
+                    "Spawning Python process: {} {:?}",
+                    python_exe, bridge_script
+                );
+                let mut child = Command::new(&python_exe)
                     .arg("-W")
                     .arg("ignore")
                     .arg(&bridge_script)
@@ -269,7 +278,9 @@ impl JobSpyScraper {
                     stdin.write_all(request_data.as_bytes())?;
                 }
 
-                child.wait_with_output()
+                let result = child.wait_with_output();
+                debug!("Python process completed");
+                result
             }
         })
         .await
@@ -282,8 +293,11 @@ impl JobSpyScraper {
             source: Some(Box::new(e)),
         })?;
 
+        debug!("Python exit status: {:?}", output.status);
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            debug!("Python stderr: {}", stderr);
             return Err(AtsError::ScraperError {
                 message: format!("JobSpy bridge script failed: {stderr}"),
                 source: None,
