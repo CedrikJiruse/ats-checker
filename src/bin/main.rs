@@ -1,6 +1,7 @@
 //! ATS Resume Checker - Main binary.
 
 use ats_checker::cli::{handlers, interactive, Cli};
+#[cfg(feature = "debug")]
 use ats_checker::debug::init_file_logging;
 use ats_checker::Config;
 use clap::Parser;
