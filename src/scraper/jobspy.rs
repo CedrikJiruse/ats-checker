@@ -24,10 +24,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::Value;
 
+use crate::debug;
 use crate::error::{AtsError, Result};
 use crate::scraper::setup::{auto_install_deps, check_dependencies, get_python_exe};
 use crate::scraper::{JobPosting, JobScraper, JobSource, SearchFilters};
-use crate::debug;
 
 /// `JobSpy` scraper that executes Python subprocess.
 ///
