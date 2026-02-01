@@ -1,7 +1,7 @@
 //! ATS Resume Checker - Main binary.
 
 use ats_checker::cli::{handlers, interactive, Cli};
-#[cfg(feature = "debug")]
+#[cfg(feature = "logging")]
 use ats_checker::debug::init_file_logging;
 use ats_checker::Config;
 use clap::Parser;
@@ -23,8 +23,8 @@ async fn main() {
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
-    // Initialize file logging (only if debug feature is enabled)
-    #[cfg(feature = "debug")]
+    // Initialize file logging (only if logging feature is enabled)
+    #[cfg(feature = "logging")]
     if let Err(e) = init_file_logging() {
         eprintln!("Warning: Failed to initialize file logging: {}", e);
     }

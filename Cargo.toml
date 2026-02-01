@@ -111,6 +111,8 @@ ocr = []
 all-providers = []
 # Enable debug/trace output for troubleshooting
 debug = []
+# Enable file logging to logs/ directory
+logging = []
 
 [[bench]]
 name = "hashing"
