@@ -159,20 +159,44 @@ fn install_packages_in_venv(packages: &[&str]) -> Result<()> {
 
 /// Check if a package is installed in the virtual environment
 fn check_venv_package(package: &str) -> bool {
+    debug_enter!("check_venv_package");
     let venv_python = get_venv_python_path();
+    debug!(
+        "Checking package '{}' using Python: {}",
+        package,
+        venv_python.display()
+    );
 
     if !venv_python.exists() {
+        debug!("venv Python does not exist at: {}", venv_python.display());
+        debug_exit!("check_venv_package");
         return false;
     }
 
     // Use -W ignore to suppress numpy warnings on Windows MINGW-W64
     let output = Command::new(&venv_python)
         .args(["-W", "ignore", "-c", &format!("import {package}")])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .output();
 
-    matches!(output, Ok(result) if result.status.success())
+    match &output {
+        Ok(result) => {
+            let success = result.status.success();
+            debug!("Package '{}' import success: {}", package, success);
+            if !success {
+                let _stderr = String::from_utf8_lossy(&result.stderr);
+                debug!("Package '{}' import stderr: {}", package, _stderr);
+            }
+            debug_exit!("check_venv_package");
+            success
+        }
+        Err(_e) => {
+            debug!("Failed to run import check for '{}': {}", package, _e);
+            debug_exit!("check_venv_package");
+            false
+        }
+    }
 }
 
 /// Get the Python executable path to use (venv preferred)
@@ -270,31 +294,53 @@ pub fn clear_dependency_cache() {
 
 /// Internal function that performs the actual dependency check.
 fn perform_dependency_check() -> DependencyCheck {
+    debug_enter!("perform_dependency_check");
+
     // First, try to find system Python
+    debug!("Attempting to detect system Python");
     let Some(python_exe) = find_python() else {
-        return DependencyCheck {
+        debug!("System Python not found");
+        debug!("Creating DependencyCheck with python_available=false");
+        let result = DependencyCheck {
             python_available: false,
             python_info: None,
             missing_deps: vec!["Python".to_string()],
             can_auto_install: false,
         };
+        debug_var!("result", &result);
+        debug_exit!("perform_dependency_check");
+        return result;
     };
+    debug!("System Python detected");
+    debug_var!("python_exe", &python_exe);
 
     // Get Python version
+    debug!("Getting Python version");
     let Some(version) = get_python_version(&python_exe) else {
-        return DependencyCheck {
+        debug!("Failed to get Python version");
+        let result = DependencyCheck {
             python_available: false,
             python_info: None,
             missing_deps: vec!["Python".to_string()],
             can_auto_install: false,
         };
+        debug_var!("result", &result);
+        debug_exit!("perform_dependency_check");
+        return result;
     };
+    debug!("Python version retrieved");
+    debug_var!("version", &version);
 
     // Check if venv exists, if not create it
-    if !venv_exists() {
+    debug!("Checking if virtual environment exists");
+    let venv_exists_result = venv_exists();
+    debug_var!("venv_exists", &venv_exists_result);
+    if !venv_exists_result {
         println!("Virtual environment not found. Creating one...");
+        debug!("Virtual environment not found, attempting to create");
         if let Err(_e) = create_venv(&python_exe) {
-            return DependencyCheck {
+            debug!("Failed to create virtual environment");
+            let result = DependencyCheck {
                 python_available: true,
                 python_info: Some(PythonInfo {
                     executable: python_exe.clone(),
@@ -305,11 +351,18 @@ fn perform_dependency_check() -> DependencyCheck {
                 missing_deps: vec!["Failed to create venv".to_string()],
                 can_auto_install: false,
             };
+            debug_var!("result", &result);
+            debug_exit!("perform_dependency_check");
+            return result;
         }
+        debug!("Virtual environment created successfully");
 
         // Install packages in the new venv
+        debug!("Installing packages in new virtual environment");
+        debug_var!("required_packages", &REQUIRED_PACKAGES);
         if let Err(_e) = install_packages_in_venv(REQUIRED_PACKAGES) {
-            return DependencyCheck {
+            debug!("Failed to install packages in venv");
+            let result = DependencyCheck {
                 python_available: true,
                 python_info: Some(PythonInfo {
                     executable: get_venv_python_path().to_string_lossy().to_string(),
@@ -320,24 +373,39 @@ fn perform_dependency_check() -> DependencyCheck {
                 missing_deps: vec!["Failed to install packages".to_string()],
                 can_auto_install: false,
             };
+            debug_var!("result", &result);
+            debug_exit!("perform_dependency_check");
+            return result;
         }
+        debug!("Packages installed successfully");
+    } else {
+        debug!("Virtual environment already exists");
     }
 
     // Check for required packages in venv
+    debug!("Checking for required packages in virtual environment");
     let has_jobspy = check_venv_package("jobspy");
     let has_pandas = check_venv_package("pandas");
+    debug!("Package check results");
+    debug_var!("has_jobspy", &has_jobspy);
+    debug_var!("has_pandas", &has_pandas);
 
     let mut missing_deps = Vec::new();
     if !has_jobspy {
+        debug!("jobspy package is missing");
         missing_deps.push("python-jobspy".to_string());
     }
     if !has_pandas {
+        debug!("pandas package is missing");
         missing_deps.push("pandas".to_string());
     }
+    debug_var!("missing_deps", &missing_deps);
 
     // Get venv Python path
     let venv_python = get_venv_python_path();
     let venv_python_str = venv_python.to_string_lossy().to_string();
+    debug!("Virtual environment Python path");
+    debug_var!("venv_python_str", &venv_python_str);
 
     let python_info = PythonInfo {
         executable: venv_python_str,
@@ -345,13 +413,23 @@ fn perform_dependency_check() -> DependencyCheck {
         has_jobspy,
         has_pandas,
     };
+    debug!("PythonInfo constructed");
+    debug_var!("python_info", &python_info);
 
-    DependencyCheck {
+    let can_auto_install = !missing_deps.is_empty();
+    debug_var!("can_auto_install", &can_auto_install);
+
+    let result = DependencyCheck {
         python_available: true,
         python_info: Some(python_info),
-        can_auto_install: !missing_deps.is_empty(),
+        can_auto_install,
         missing_deps,
-    }
+    };
+    debug!("Final DependencyCheck constructed");
+    debug_var!("result", &result);
+
+    debug_exit!("perform_dependency_check");
+    result
 }
 
 /// Find available Python executable.
